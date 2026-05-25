@@ -12,15 +12,13 @@ _BASE_URL = "https://api.kavenegar.com/v1/{api_key}/sms/send.json"
 
 
 class KavenegarProvider(BaseSMSProvider):
-    def __init__(self, api_key: str, sender: str) -> None:
+    def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._sender = sender
 
     async def send_sms(self, to: str, message: str) -> None:
         url = _BASE_URL.format(api_key=self._api_key)
         payload = {
             "receptor": to,
-            "sender": self._sender,
             "message": message,
         }
         async with httpx.AsyncClient(timeout=10) as client:

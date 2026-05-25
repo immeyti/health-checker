@@ -42,7 +42,6 @@ class SMSChannel(BaseChannel):
             kav = config.get("kavenegar", {})
             provider = KavenegarProvider(
                 api_key=kav["api_key"],
-                sender=kav.get("sender", ""),
             )
         elif provider_name == "twilio":
             twl = config.get("twilio", {})
