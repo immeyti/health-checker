@@ -1,0 +1,29 @@
+services:
+  monitor:
+    build: .
+    restart: unless-stopped
+
+    # NET_RAW is required for ICMP ping via subprocess
+    cap_add:
+      - NET_RAW
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      # Secrets — copy .env.example → .env and fill in values before first run
+      - ./.env:/app/.env:ro
+
+      # Config — edit config/config.yaml on the host; restart to reload
+      - ./config:/app/config:ro
+
+      # Persistent data
+      - monitor_data:/app/data        # SQLite database
+      - monitor_videos:/app/videos    # check recordings (.webm)
+      - monitor_screenshots:/app/screenshots
+
+
+volumes:
+  monitor_data:
+  monitor_videos:
+  monitor_screenshots:

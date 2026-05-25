@@ -1,0 +1,51 @@
+check_interval: 300  # seconds between each monitoring cycle
+
+storage:
+  retention_days: 30  # keep check logs for this many days
+
+targets:
+  ping:
+    - name: "My Server"
+      host: "1.2.3.4"
+
+  tcp:
+    - name: "My Server TCP"
+      host: "1.2.3.4"
+      port: 443
+      timeout: 5000
+
+  dashboards:
+    - name: "My Dashboard"
+      url: "https://example.com/login"
+      username: "admin@example.com"
+      password: "${DASHBOARD_PASSWORD}"
+      success_indicator:
+        type: "url_contains"   # options: url_contains | element_exists | text_contains
+        value: "/dashboard"
+      timeout: 15000           # ms
+    # - name: "Kibana"
+    #   url: "https://kibana.example.com/login"
+    #   username: "elastic"
+    #   password: "${KIBANA_PASSWORD}"
+    #   success_indicator:
+    #     type: "element_exists"
+    #     value: "[data-test-subj='homeApp']"
+    #   timeout: 20000
+
+alerts:
+  channels:
+    - type: "sms"
+      provider: "kavenegar"    # options: kavenegar | twilio
+      recipients:
+        - "+1234567890"
+      kavenegar:
+        api_key: "${KAVENEGAR_API_KEY}"
+        sender: "YOUR_SENDER_NUMBER"
+      # twilio:
+      #   account_sid: "${TWILIO_ACCOUNT_SID}"
+      #   auth_token: "${TWILIO_AUTH_TOKEN}"
+      #   from_number: "+15551234567"
+
+web:
+  host: "0.0.0.0"
+  port: 8000

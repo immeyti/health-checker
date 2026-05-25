@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: real network I/O — ping unreachable host (~5s)",
+]

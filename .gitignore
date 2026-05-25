@@ -1,0 +1,66 @@
+# Secrets & local config
+.env
+config/config.yaml
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+.playwright/
+playwright-report/
+test-results/
+
+# Runtime output
+screenshots/
+videos/
+logs/
+
+# Node
+node_modules/
+package-lock.json
+
+# Generated CSS (built from src/web/static/input.css via npm run build:css)
+src/web/static/tailwind.css
+
+# Archives / binaries
+*.tar
+*.zip
+
+# Images / screenshots dumped in project root
+*.jpg
+*.jpeg
+*.png
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/

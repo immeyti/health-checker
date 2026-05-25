@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Monitor — Status{% endblock %}
+
+{% block extra_styles %}
+  /* Timeline blocks — fixed size Tailwind can't do inline */
+  .tl-block { width: 10px; height: 22px; border-radius: 3px; flex-shrink: 0; transition: opacity .15s; }
+  .tl-block:hover { opacity: .65; cursor: default; }
+  .tl-up      { background: #10b981; }
+  .tl-down    { background: #ef4444; }
+  .tl-unknown { background: #1e293b; border: 1px solid #334155; }
+
+  /* Video thumbnail */
+  .video-thumb { width: 96px; height: 60px; object-fit: cover; border-radius: 6px;
+                 border: 1px solid #334155; cursor: pointer; display: block;
+                 background: #020617; transition: border-color .15s; }
+  .video-thumb:hover { border-color: #64748b; }
+
+  /* Lightbox */
+  .lightbox { display: none; position: fixed; inset: 0;
+              background: rgba(0,0,0,.92); z-index: 1000;
+              align-items: center; justify-content: center; cursor: zoom-out; }
+  .lightbox.active { display: flex; }
+  .lightbox video { max-width: 92vw; max-height: 88vh; border-radius: 10px;
+                    box-shadow: 0 8px 60px rgba(0,0,0,.8); cursor: default; }
+  .lightbox-close { position: fixed; top: 1rem; right: 1.5rem; font-size: 1.75rem;
+                    color: #fff; cursor: pointer; background: none; border: none;
+                    line-height: 1; opacity: .6; }
+  .lightbox-close:hover { opacity: 1; }
+{% endblock %}
+
+{% block content %}
+
+  {# ── Compute summary counts ──────────────────────────────────────── #}
+  {% set total      = statuses | length %}
+  {% set up_count   = statuses | selectattr("current_status", "equalto", "UP")   | list | length %}
+  {% set down_count = statuses | selectattr("current_status", "equalto", "DOWN") | list | length %}
+
+  {# ── Summary cards ───────────────────────────────────────────────── #}
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 px-5 py-4">
+      <p class="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1">Total</p>
+      <p class="text-3xl font-bold text-slate-200">{{ total }}</p>
+    </div>
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 px-5 py-4">
+      <p class="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1">Operational</p>
+      <p class="text-3xl font-bold text-emerald-400">{{ up_count }}</p>
+    </div>
+
+    {% if down_count > 0 %}
+    <div class="rounded-xl bg-red-950/60 border border-red-900/60 px-5 py-4">
+      <p class="text-xs font-medium uppercase tracking-widest text-red-400/70 mb-1">Down</p>
+      <p class="text-3xl font-bold text-red-400">{{ down_count }}</p>
+    </div>
+    {% else %}
+    <div class="rounded-xl bg-slate-900 border border-slate-800 px-5 py-4">
+      <p class="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1">Down</p>
+      <p class="text-3xl font-bold text-slate-600">0</p>
+    </div>
+    {% endif %}
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 px-5 py-4">
+      <p class="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1">Uptime window</p>
+      <p class="text-3xl font-bold text-slate-400">{{ retention_days }}<span class="text-lg font-medium text-slate-600">d</span></p>
+    </div>
+
+  </div>
+
+  {# ── Targets table ────────────────────────────────────────────────── #}
+  {% if statuses %}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-800">
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-5 py-3">Target</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Type</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Status</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Uptime {{ retention_days }}d</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Avg Latency</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Last Checked</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">24h Timeline</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Recording</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/70">
+        {% for s in statuses %}
+        <tr class="hover:bg-slate-800/30 transition-colors">
+
+          {# Target name #}
+          <td class="px-5 py-4">
+            <p class="font-semibold text-slate-100">{{ s.name }}</p>
+          </td>
+
+          {# Type chip #}
+          <td class="px-4 py-4">
+            <span class="inline-block text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+              {{ s.target_type }}
+            </span>
+          </td>
+
+          {# Status badge #}
+          <td class="px-4 py-4">
+            {% if s.current_status == "UP" %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-emerald-950 text-emerald-400 ring-1 ring-emerald-800/50">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> UP
+              </span>
+            {% elif s.current_status == "DOWN" %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-red-950 text-red-400 ring-1 ring-red-800/50">
+                <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse-dot"></span> DOWN
+              </span>
+            {% else %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-slate-800 text-slate-400 ring-1 ring-slate-700/50">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> {{ s.current_status }}
+              </span>
+            {% endif %}
+            {% if s.consecutive_failures > 0 %}
+              <p class="text-xs text-red-400/80 mt-1">
+                {{ s.consecutive_failures }} failure{{ "s" if s.consecutive_failures != 1 }}
+              </p>
+            {% endif %}
+          </td>
+
+          {# Uptime % #}
+          <td class="px-4 py-4">
+            {% if s.uptime_pct is not none %}
+              <span class="font-semibold
+                {% if s.uptime_pct >= 99 %}text-emerald-400
+                {% elif s.uptime_pct >= 95 %}text-yellow-400
+                {% else %}text-red-400{% endif %}">
+                {{ "%.2f"|format(s.uptime_pct) }}%
+              </span>
+            {% else %}
+              <span class="text-slate-600">—</span>
+            {% endif %}
+          </td>
+
+          {# Avg latency #}
+          <td class="px-4 py-4">
+            {% if s.avg_latency_ms is not none %}
+              <span class="text-slate-300">{{ "%.1f"|format(s.avg_latency_ms) }}<span class="text-slate-500 text-xs"> ms</span></span>
+            {% else %}
+              <span class="text-slate-600">—</span>
+            {% endif %}
+          </td>
+
+          {# Last checked #}
+          <td class="px-4 py-4 text-slate-400 text-xs whitespace-nowrap">
+            {{ s.last_checked.strftime("%Y-%m-%d") }}<br>
+            <span class="text-slate-500">{{ s.last_checked.strftime("%H:%M") }} UTC</span>
+          </td>
+
+          {# 24h timeline #}
+          <td class="px-4 py-4">
+            <div class="flex gap-0.5 items-center" title="24h status — oldest left, newest right">
+              {% for bucket in s.timeline_24h %}
+                {% if bucket == "UP" %}
+                  <div class="tl-block tl-up" title="UP"></div>
+                {% elif bucket == "DOWN" %}
+                  <div class="tl-block tl-down" title="DOWN"></div>
+                {% else %}
+                  <div class="tl-block tl-unknown" title="No data"></div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </td>
+
+          {# Video recording #}
+          <td class="px-4 py-4">
+            {% if s.target_type == "dashboard" and s.screenshot_path %}
+              {% set video_url = "/" + s.screenshot_path.replace("\\", "/") + "?t=" + s.last_checked.timestamp() | int | string %}
+              <video
+                class="video-thumb"
+                src="{{ video_url }}"
+                muted
+                preload="metadata"
+                title="Click to watch full recording"
+                onclick="openLightbox('{{ video_url }}')"
+              ></video>
+            {% else %}
+              <span class="text-slate-600">—</span>
+            {% endif %}
+          </td>
+
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Lightbox #}
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()">&#x2715;</button>
+    <video id="lightbox-video" controls autoplay loop muted onclick="event.stopPropagation()"></video>
+  </div>
+  <script>
+    function openLightbox(url) {
+      const v = document.getElementById('lightbox-video');
+      v.src = url;
+      v.muted = false;
+      document.getElementById('lightbox').classList.add('active');
+      v.play().catch(() => {});
+    }
+    function closeLightbox() {
+      const v = document.getElementById('lightbox-video');
+      v.pause();
+      v.src = '';
+      document.getElementById('lightbox').classList.remove('active');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+  </script>
+
+  {% else %}
+    <div class="text-center py-20 text-slate-600">
+      <p class="text-4xl mb-4">&#128307;</p>
+      <p class="text-lg font-medium text-slate-500">No targets checked yet</p>
+      <p class="text-sm mt-1">The daemon will populate data on its first cycle.</p>
+    </div>
+  {% endif %}
+
+{% endblock %}

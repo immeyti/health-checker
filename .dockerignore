@@ -1,0 +1,42 @@
+# Secrets & local state
+.env
+monitor.db
+*.db-shm
+*.db-wal
+
+# Runtime output (managed by Docker volumes in production)
+screenshots/
+videos/
+logs/
+data/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Tests (not needed in the image)
+tests/
+test_dashboard.py
+requirements-test.txt
+pyproject.toml
+.pytest_cache/
+.coverage
+
+# Playwright local state
+.playwright/
+playwright-report/
+test-results/
+
+# VCS & IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
