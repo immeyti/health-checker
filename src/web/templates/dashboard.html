@@ -90,6 +90,9 @@
           {# Target name #}
           <td class="px-5 py-4">
             <p class="font-semibold text-slate-100">{{ s.name }}</p>
+            {% if host_map.get(s.name) %}
+              <p class="text-xs text-slate-500 mt-0.5 font-mono truncate max-w-[200px]">{{ host_map.get(s.name) }}</p>
+            {% endif %}
           </td>
 
           {# Type chip #}
@@ -146,8 +149,8 @@
 
           {# Last checked #}
           <td class="px-4 py-4 text-slate-400 text-xs whitespace-nowrap">
-            {{ s.last_checked.strftime("%Y-%m-%d") }}<br>
-            <span class="text-slate-500">{{ s.last_checked.strftime("%H:%M") }} UTC</span>
+            {{ (s.last_checked|tehran).strftime("%Y-%m-%d") }}<br>
+            <span class="text-slate-500">{{ (s.last_checked|tehran).strftime("%H:%M") }} Tehran</span>
           </td>
 
           {# 24h timeline #}

@@ -59,10 +59,19 @@ async def _main(args: argparse.Namespace) -> None:
     state = StateTracker(db_path=args.db)
     daemon = MonitoringDaemon(config=config, state=state)
 
+    host_map: dict[str, str] = {}
+    for t in config.ping_targets:
+        host_map[t.name] = t.host
+    for t in config.tcp_targets:
+        host_map[t.name] = f"{t.host}:{t.port}"
+    for t in config.dashboard_targets:
+        host_map[t.name] = t.url
+
     app = create_app(
         state=state,
         retention_days=config.storage.retention_days,
         screenshots_dir=config.storage.screenshots_dir,
+        host_map=host_map,
     )
 
     uvicorn_config = uvicorn.Config(

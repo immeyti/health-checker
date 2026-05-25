@@ -21,13 +21,31 @@
   <header class="border-b border-slate-800/60 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
       <div class="flex items-center gap-2.5">
-        <span class="text-lg">&#128308;</span>
         <span class="font-semibold text-slate-100 tracking-tight">Dashboard Monitor</span>
       </div>
-      <div class="flex items-center gap-2 text-xs text-slate-500">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse-dot"></span>
-        Auto-refreshes every 30s
+      <div class="flex items-center gap-4 text-xs text-slate-500">
+        <span id="clock" class="font-mono text-slate-400"></span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse-dot"></span>
+          Auto-refreshes every 30s
+        </span>
       </div>
+      <script>
+        (function () {
+          var tz = 'Asia/Tehran';
+          function tick() {
+            var now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleString('en-GB', {
+              timeZone: tz,
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit', second: '2-digit',
+              hour12: false
+            }).replace(',', '');
+          }
+          tick();
+          setInterval(tick, 1000);
+        })();
+      </script>
     </div>
   </header>
 

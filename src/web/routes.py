@@ -16,6 +16,7 @@ def build_router(
     retention_days: int,
     username: str,
     password: str,
+    host_map: dict[str, str] | None = None,
 ) -> APIRouter:
     _security = HTTPBasic()
 
@@ -44,6 +45,7 @@ def build_router(
             context={
                 "statuses": statuses,
                 "retention_days": retention_days,
+                "host_map": host_map or {},
             },
         )
 
