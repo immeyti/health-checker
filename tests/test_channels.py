@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
+import httpx
 import pytest
+import respx
 
 from src.channels import build_channel
 from src.channels.sms.base_provider import BaseSMSProvider
 from src.channels.sms.sms_channel import SMSChannel
+from src.channels.telegram.telegram_channel import TelegramChannel
 from src.models import Alert
 
 
@@ -60,4 +64,27 @@ def test_build_channel_sms_returns_sms_channel():
 
 def test_build_channel_unknown_type_raises():
     with pytest.raises(ValueError, match="Unknown alert channel type"):
-        build_channel({"type": "telegram"})
+        build_channel({"type": "carrier_pigeon"})
+
+
+def test_build_channel_telegram_returns_telegram_channel():
+    config = {
+        "type": "telegram",
+        "chat_ids": ["111"],
+        "telegram": {"bot_token": "fake-token"},
+    }
+    channel = build_channel(config)
+    assert isinstance(channel, TelegramChannel)
+
+
+@respx.mock
+async def test_telegram_channel_sends_to_all_chat_ids():
+    route = respx.post("https://api.telegram.org/botfake-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    channel = TelegramChannel(bot_token="fake-token", chat_ids=["111", "222"])
+    await channel.send(_make_alert(target_name="MyServer"))
+    assert route.call_count == 2
+    payloads = [json.loads(call.request.content) for call in route.calls]
+    assert [p["chat_id"] for p in payloads] == ["111", "222"]
+    assert "MyServer" in payloads[0]["text"]

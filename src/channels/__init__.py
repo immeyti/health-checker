@@ -13,6 +13,9 @@ def build_channel(config: dict) -> BaseChannel:
     elif channel_type == "bale":
         from .bale.bale_channel import BaleChannel
         return BaleChannel.from_config(config)
+    elif channel_type == "telegram":
+        from .telegram.telegram_channel import TelegramChannel
+        return TelegramChannel.from_config(config)
     else:
         raise ValueError(f"Unknown alert channel type: {channel_type!r}")
 

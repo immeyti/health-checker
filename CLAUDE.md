@@ -187,7 +187,7 @@ pytest -k "transition"
 | `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge (13 cases) |
 | `tests/test_ping.py` | PingChecker — real subprocess ping (1 fast + 1 slow) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
-| `tests/test_channels.py` | SMSChannel + build_channel (4 cases) |
+| `tests/test_channels.py` | SMSChannel, TelegramChannel + build_channel (6 cases) |
 | `tests/test_daemon.py` | MonitoringDaemon._run_cycle — alert dispatch, broken channel (3 cases) |
 | `tests/test_web.py` | FastAPI routes via TestClient (8 cases) |
 

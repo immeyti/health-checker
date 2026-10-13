@@ -24,6 +24,8 @@ def _setup_logging() -> None:
             logging.StreamHandler(sys.stdout),
         ],
     )
+    # httpx logs full request URLs at INFO, which embed bot tokens and API keys
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _parse_args() -> argparse.Namespace:

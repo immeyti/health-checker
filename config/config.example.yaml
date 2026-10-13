@@ -45,6 +45,11 @@ alerts:
       #   account_sid: "${TWILIO_ACCOUNT_SID}"
       #   auth_token: "${TWILIO_AUTH_TOKEN}"
       #   from_number: "+15551234567"
+    # - type: "telegram"
+    #   chat_ids:
+    #     - "123456789"
+    #   telegram:
+    #     bot_token: "${TELEGRAM_BOT_TOKEN}"
 
 web:
   host: "0.0.0.0"

@@ -16,6 +16,7 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 - **Live web UI** — status table, 24-hour timeline, click-to-play video lightbox
 - **REST API** — `/api/status`, `/api/history/{target}` for external consumers
 - **SMS alerts** on UP↔DOWN transitions via [Kavenegar](https://kavenegar.com) or [Twilio](https://twilio.com)
+- **Telegram alerts** via a bot to one or more chat IDs
 - **HTTP Basic Auth** on the web UI
 - **Docker-first** — single `docker compose up -d` to run everything
 
@@ -196,7 +197,7 @@ pytest                  # full suite including real network tests
 - [ ] **Alert cooldown** — suppress repeated alerts until the target has been stable for N cycles (avoid alert storms during flapping)
 - [ ] **Alert after N failures** — `consecutive_failures` column already tracked in the DB; wire it up in the daemon
 - [ ] **Recovery alerts** — send an explicit "back UP" SMS when a target recovers
-- [ ] **Email / Telegram / webhook channels** — the channel interface is ready; just needs new implementations
+- [ ] **Email / webhook channels** — the channel interface is ready; just needs new implementations
 - [ ] **HTTP endpoint checker** — check a URL's HTTP status code without a full browser login (lighter than Playwright for simple APIs)
 - [ ] **Prometheus metrics endpoint** — expose check results as Gauge metrics for Grafana dashboards
 - [ ] **Config hot-reload** — watch `config.yaml` for changes and apply without a restart
