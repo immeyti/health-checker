@@ -9,7 +9,7 @@ import sys
 import uvicorn
 from dotenv import load_dotenv
 
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, target_host
 from .daemon import MonitoringDaemon
 from .state import StateTracker
 from .web.app import create_app
@@ -61,16 +61,19 @@ async def _main(args: argparse.Namespace) -> None:
     state = StateTracker(db_path=args.db)
     daemon = MonitoringDaemon(config=config, state=state)
 
-    host_map: dict[str, str] = {}
-    for t in config.ping_targets:
-        host_map[t.name] = t.host
-    for t in config.tcp_targets:
-        host_map[t.name] = f"{t.host}:{t.port}"
-    for t in config.dashboard_targets:
-        host_map[t.name] = t.url
+    host_map = {
+        t.name: target_host(t)
+        for t in [
+            *config.ping_targets,
+            *config.tcp_targets,
+            *config.dashboard_targets,
+            *state.get_targets(),
+        ]
+    }
 
     app = create_app(
         state=state,
+        daemon=daemon,
         retention_days=config.storage.retention_days,
         screenshots_dir=config.storage.screenshots_dir,
         host_map=host_map,

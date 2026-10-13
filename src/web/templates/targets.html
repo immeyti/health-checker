@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}Monitor — Targets{% endblock %}
+
+{# No auto-refresh here — it would wipe the form while typing #}
+{% block refresh %}{% endblock %}
+{% block refresh_note %}{% endblock %}
+
+{% block extra_styles %}
+  .type-card input:checked + div { border-color: #10b981; background: rgba(6, 78, 59, .35); }
+  .type-card input:checked + div .type-title { color: #6ee7b7; }
+  .type-card input:focus-visible + div { outline: 2px solid #10b981; outline-offset: 2px; }
+  .field { width: 100%; border-radius: .5rem; background: #020617; border: 1px solid #334155;
+           padding: .55rem .75rem; color: #e2e8f0; font-size: .875rem; }
+  .field:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+  .field::placeholder { color: #475569; }
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #475569;
+             border-top-color: #e2e8f0; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+{% endblock %}
+
+{% block content %}
+
+  <div class="mb-8">
+    <h1 class="text-xl font-semibold text-slate-100">Targets</h1>
+    <p class="text-sm text-slate-500 mt-1">Add servers and dashboards to monitor. Changes apply from the next check cycle — no restart needed.</p>
+  </div>
+
+  <div class="grid gap-6 lg:grid-cols-5 items-start">
+
+    {# ── Add form ───────────────────────────────────────────────────── #}
+    <form id="target-form" class="lg:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 grid gap-6" novalidate>
+
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">1 · What to check</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label class="type-card cursor-pointer">
+            <input type="radio" name="type" value="dashboard" class="sr-only" checked>
+            <div class="h-full rounded-xl border border-slate-700 p-4 transition-colors hover:border-slate-500">
+              <p class="type-title font-semibold text-slate-200 text-sm">Dashboard login</p>
+              <p class="text-xs text-slate-500 mt-1">Logs in with a real browser and checks it worked</p>
+            </div>
+          </label>
+          <label class="type-card cursor-pointer">
+            <input type="radio" name="type" value="ping" class="sr-only">
+            <div class="h-full rounded-xl border border-slate-700 p-4 transition-colors hover:border-slate-500">
+              <p class="type-title font-semibold text-slate-200 text-sm">Ping</p>
+              <p class="text-xs text-slate-500 mt-1">Is the server reachable on the network?</p>
+            </div>
+          </label>
+          <label class="type-card cursor-pointer">
+            <input type="radio" name="type" value="tcp" class="sr-only">
+            <div class="h-full rounded-xl border border-slate-700 p-4 transition-colors hover:border-slate-500">
+              <p class="type-title font-semibold text-slate-200 text-sm">TCP port</p>
+              <p class="text-xs text-slate-500 mt-1">Is a service listening on a port (e.g. 443)?</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid gap-4">
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">2 · Details</p>
+
+        <label class="grid gap-1.5 text-sm text-slate-300">Name
+          <input name="name" required class="field" placeholder="e.g. Sales Panel">
+          <span class="text-xs text-slate-500">Shown on the status page. Must be unique.</span>
+        </label>
+
+        <fieldset data-type="dashboard" class="grid gap-4">
+          <label class="grid gap-1.5 text-sm text-slate-300">Login page URL
+            <input name="url" type="url" required class="field font-mono" placeholder="https://panel.example.com/login">
+          </label>
+          <div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300">Username
+              <input name="username" required autocomplete="off" class="field">
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300">Password
+              <input name="password" type="password" required autocomplete="new-password" class="field">
+              <span class="text-xs text-slate-500">Stored encrypted.</span>
+            </label>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="grid gap-1.5 text-sm text-slate-300">Login succeeded when
+              <select name="indicator_type" id="indicator-type" class="field">
+                <option value="url_contains">URL contains</option>
+                <option value="text_contains">Page text contains</option>
+                <option value="element_exists">Element exists</option>
+              </select>
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300">Value
+              <input name="indicator_value" id="indicator-value" required class="field font-mono" placeholder="/dashboard">
+            </label>
+          </div>
+          <p id="indicator-help" class="text-xs text-slate-500 -mt-2"></p>
+          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
+            <input name="timeout" type="number" min="1" value="15000" class="field">
+            <span class="text-xs text-slate-500">Raise it for slow panels (e.g. 45000).</span>
+          </label>
+        </fieldset>
+
+        <fieldset data-type="ping" class="grid gap-4">
+          <label class="grid gap-1.5 text-sm text-slate-300">Host or IP
+            <input name="host" required class="field font-mono" placeholder="1.2.3.4 or server.example.com">
+          </label>
+        </fieldset>
+
+        <fieldset data-type="tcp" class="grid gap-4">
+          <div class="grid gap-4 sm:grid-cols-3">
+            <label class="grid gap-1.5 text-sm text-slate-300 sm:col-span-2">Host or IP
+              <input name="host" required class="field font-mono" placeholder="1.2.3.4 or server.example.com">
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300">Port
+              <input name="port" type="number" min="1" max="65535" required class="field" placeholder="443">
+            </label>
+          </div>
+          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
+            <input name="timeout" type="number" min="1" value="5000" class="field">
+          </label>
+        </fieldset>
+      </div>
+
+      <div class="grid gap-4 border-t border-slate-800 pt-5">
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" id="test-btn" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 text-slate-200 ring-1 ring-slate-700 hover:bg-slate-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">Test now</button>
+          <button type="submit" id="add-btn" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">Add target</button>
+          <span class="text-xs text-slate-500">Test runs one check without saving.</span>
+        </div>
+        <div id="result" hidden class="rounded-xl border px-4 py-3 text-sm"></div>
+      </div>
+    </form>
+
+    {# ── Targets added from the UI ───────────────────────────────────── #}
+    <aside class="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">Added from the UI</p>
+        <span class="text-xs text-slate-500">{{ targets | length }}</span>
+      </div>
+      {% if targets %}
+      <ul class="divide-y divide-slate-800/70">
+        {% for t in targets %}
+        <li class="px-5 py-3 flex items-center gap-3">
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold text-slate-100 text-sm truncate">{{ t.name }}</p>
+            <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ host_map.get(t.name, "") }}</p>
+          </div>
+          <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+            {{ "dashboard" if t.url is defined else ("tcp" if t.port is defined else "ping") }}
+          </span>
+          <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
+                  data-name="{{ t.name }}">Delete</button>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="px-5 py-8 text-sm text-slate-500 text-center">Nothing added yet.<br>Targets you add here will appear in this list.</p>
+      {% endif %}
+      <p class="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Targets defined in config.yaml are managed in that file and aren't listed here.</p>
+    </aside>
+
+  </div>
+
+  <script>
+    const form = document.getElementById('target-form');
+    const resultEl = document.getElementById('result');
+    const testBtn = document.getElementById('test-btn');
+    const addBtn = document.getElementById('add-btn');
+
+    const INDICATOR_HELP = {
+      url_contains:   ['/dashboard', 'After login the page address contains this text, e.g. /dashboard or /home.'],
+      text_contains:  ['Welcome', 'After login the page shows this text somewhere, e.g. Welcome or Logout.'],
+      element_exists: ['#logout-button', 'After login the page has an element matching this CSS selector.'],
+    };
+    const indicatorType = document.getElementById('indicator-type');
+    function updateIndicatorHelp() {
+      const [placeholder, help] = INDICATOR_HELP[indicatorType.value];
+      document.getElementById('indicator-value').placeholder = placeholder;
+      document.getElementById('indicator-help').textContent = help;
+    }
+    indicatorType.addEventListener('change', updateIndicatorHelp);
+    updateIndicatorHelp();
+
+    // Disabled fieldsets are skipped by FormData and by required-field validation
+    function selectedType() { return form.querySelector('input[name=type]:checked').value; }
+    function toggleFieldsets() {
+      form.querySelectorAll('fieldset').forEach(fs => {
+        fs.disabled = fs.dataset.type !== selectedType();
+        fs.hidden = fs.disabled;
+      });
+      resultEl.hidden = true;
+    }
+    form.querySelectorAll('input[name=type]').forEach(r => r.addEventListener('change', toggleFieldsets));
+    toggleFieldsets();
+
+    function showResult(kind, title, detail) {
+      const styles = {
+        up:      'border-emerald-800/60 bg-emerald-950/40 text-emerald-300',
+        down:    'border-red-900/60 bg-red-950/40 text-red-300',
+        pending: 'border-slate-700 bg-slate-950 text-slate-300',
+      };
+      resultEl.className = 'rounded-xl border px-4 py-3 text-sm ' + styles[kind];
+      resultEl.replaceChildren();
+      const head = document.createElement('div');
+      head.className = 'flex items-center gap-2 font-semibold';
+      if (kind === 'pending') head.appendChild(Object.assign(document.createElement('span'), {className: 'spinner'}));
+      head.appendChild(document.createTextNode(title));
+      resultEl.appendChild(head);
+      if (detail) {
+        const pre = document.createElement('pre');
+        pre.className = 'mt-2 text-xs font-mono whitespace-pre-wrap opacity-80';
+        pre.textContent = detail;
+        resultEl.appendChild(pre);
+      }
+      resultEl.hidden = false;
+    }
+
+    function setBusy(busy) { testBtn.disabled = busy; addBtn.disabled = busy; }
+
+    async function errorText(resp) {
+      const body = await resp.json();
+      if (typeof body.detail === 'string') return body.detail;
+      return body.detail.map(e => e.loc.slice(-1)[0] + ': ' + e.msg).join('\n');
+    }
+
+    function post(url) {
+      return fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+    }
+
+    testBtn.addEventListener('click', async () => {
+      if (!form.reportValidity()) return;
+      setBusy(true);
+      const started = Date.now();
+      const label = selectedType() === 'dashboard' ? 'Logging in' : 'Checking';
+      const tick = () => showResult('pending', `${label}… ${Math.round((Date.now() - started) / 1000)}s`,
+        selectedType() === 'dashboard' ? 'Dashboard logins can take up to a minute.' : '');
+      tick();
+      const timer = setInterval(tick, 1000);
+      try {
+        const resp = await post('/api/targets/test');
+        if (!resp.ok) return showResult('down', 'Invalid input', await errorText(resp));
+        const r = await resp.json();
+        const latency = r.latency_ms === null ? '' : ` · ${Math.round(r.latency_ms)} ms`;
+        if (r.status === 'UP') showResult('up', 'UP' + latency, 'Looks good — you can add this target.');
+        else showResult('down', 'DOWN' + latency, r.error_message);
+      } finally {
+        clearInterval(timer);
+        setBusy(false);
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!form.reportValidity()) return;
+      setBusy(true);
+      const resp = await post('/api/targets');
+      if (resp.ok) return location.reload();
+      showResult('down', 'Could not add target', await errorText(resp));
+      setBusy(false);
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Delete "${btn.dataset.name}" and its history?`)) return;
+        btn.disabled = true;
+        const resp = await fetch('/api/targets/' + encodeURIComponent(btn.dataset.name), {method: 'DELETE'});
+        if (resp.ok) return location.reload();
+        btn.disabled = false;
+        alert(await errorText(resp));
+      });
+    });
+  </script>
+
+{% endblock %}

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from src.config import DashboardTarget, PingTarget, SuccessIndicator, TcpTarget
 from src.state import StateTracker
 from tests.conftest import make_result
 
@@ -102,3 +103,52 @@ def test_get_history_desc_order(state):
     history = state.get_history("host-a")
     assert history[0].checked_at > history[1].checked_at
     assert history[0].status == "DOWN"
+
+
+# ---------------------------------------------------------------------------
+# Targets added from the web UI
+# ---------------------------------------------------------------------------
+
+
+def _dashboard_target(name: str = "panel") -> DashboardTarget:
+    return DashboardTarget(
+        name=name,
+        url="https://panel.example.com/login",
+        username="admin",
+        password="secret",
+        success_indicator=SuccessIndicator(type="url_contains", value="/dashboard"),
+        timeout=20000,
+    )
+
+
+def test_add_and_get_targets_roundtrip(state):
+    targets = [
+        _dashboard_target(),
+        PingTarget(name="ping-a", host="10.0.0.1"),
+        TcpTarget(name="tcp-a", host="10.0.0.2", port=443, timeout=3000),
+    ]
+    for t in targets:
+        state.add_target(t)
+    assert state.get_targets() == targets  # ordered by name
+
+
+def test_dashboard_password_encrypted_at_rest(state):
+    state.add_target(_dashboard_target())
+    raw = state._conn.execute("SELECT config FROM targets").fetchone()["config"]
+    assert "secret" not in raw
+    assert state.get_targets()[0].password == "secret"
+
+
+def test_delete_target_removes_state_and_history(state):
+    state.add_target(PingTarget(name="ping-a", host="10.0.0.1"))
+    state.update(make_result(name="ping-a"))
+    assert state.delete_target("ping-a") is True
+    assert state.get_targets() == []
+    assert state.get_status("ping-a") is None
+    assert state.get_history("ping-a") == []
+
+
+def test_delete_unknown_target_returns_false(state):
+    state.update(make_result(name="yaml-target"))
+    assert state.delete_target("yaml-target") is False
+    assert state.get_status("yaml-target") is not None

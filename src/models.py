@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from .config import DashboardTarget, PingTarget, SuccessIndicator, TcpTarget
 
 
 class CheckResult(BaseModel):
@@ -50,3 +52,52 @@ class CheckLog(BaseModel):
     checked_at: datetime
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Web UI input for adding / testing a target
+# ---------------------------------------------------------------------------
+
+
+class PingTargetIn(BaseModel):
+    type: Literal["ping"]
+    name: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+
+    def to_target(self) -> PingTarget:
+        return PingTarget(name=self.name, host=self.host)
+
+
+class TcpTargetIn(BaseModel):
+    type: Literal["tcp"]
+    name: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    timeout: int = Field(default=5000, gt=0)
+
+    def to_target(self) -> TcpTarget:
+        return TcpTarget(name=self.name, host=self.host, port=self.port, timeout=self.timeout)
+
+
+class DashboardTargetIn(BaseModel):
+    type: Literal["dashboard"]
+    name: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    indicator_type: Literal["url_contains", "element_exists", "text_contains"]
+    indicator_value: str = Field(min_length=1)
+    timeout: int = Field(default=15000, gt=0)
+
+    def to_target(self) -> DashboardTarget:
+        return DashboardTarget(
+            name=self.name,
+            url=self.url,
+            username=self.username,
+            password=self.password,
+            success_indicator=SuccessIndicator(type=self.indicator_type, value=self.indicator_value),
+            timeout=self.timeout,
+        )
+
+
+TargetIn = Annotated[PingTargetIn | TcpTargetIn | DashboardTargetIn, Field(discriminator="type")]

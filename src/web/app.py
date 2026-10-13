@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..daemon import MonitoringDaemon
 from ..state import StateTracker
 from .routes import build_router
 
@@ -26,6 +27,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def create_app(
     state: StateTracker,
+    daemon: MonitoringDaemon,
     retention_days: int = 30,
     screenshots_dir: str = "screenshots",
     host_map: dict[str, str] | None = None,
@@ -36,6 +38,10 @@ def create_app(
         raise RuntimeError(
             "MONITOR_USERNAME and MONITOR_PASSWORD must be set in the environment"
         )
+    if not os.environ.get("MONITOR_SECRET_KEY"):
+        raise RuntimeError(
+            "MONITOR_SECRET_KEY must be set in the environment (encrypts dashboard passwords)"
+        )
 
     app = FastAPI(title="Dashboard Monitor", docs_url=None, redoc_url=None)
 
@@ -45,6 +51,7 @@ def create_app(
     templates.env.filters["tehran"] = _to_tehran
     router = build_router(
         state=state,
+        daemon=daemon,
         templates=templates,
         retention_days=retention_days,
         username=username,

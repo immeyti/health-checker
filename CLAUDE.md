@@ -32,8 +32,9 @@ python3 test_dashboard.py
 src/
   main.py          # entry point — wires daemon + uvicorn in one asyncio event loop
   config.py        # YAML loader with ${ENV_VAR} interpolation → typed AppConfig
-  models.py        # Pydantic models: CheckResult, TargetStatus, Alert, CheckLog
-  state.py         # SQLite StateTracker — two tables: target_states + check_logs
+  models.py        # Pydantic models: CheckResult, TargetStatus, Alert, CheckLog, *TargetIn (UI input)
+  state.py         # SQLite StateTracker — tables: target_states + check_logs + targets (UI-added)
+  crypto.py        # Fernet encrypt/decrypt with MONITOR_SECRET_KEY (UI dashboard passwords)
   daemon.py        # async monitoring loop, concurrent checkers, alert dispatch
 
   checkers/
@@ -52,10 +53,11 @@ src/
 
   web/
     app.py         # FastAPI factory — mounts /static, /screenshots, /videos static dirs
-    routes.py      # GET /, GET /api/status, GET /api/history/{target_name}
+    routes.py      # GET /, /api/status, /api/history/{name}; GET /targets, POST /api/targets[/test], DELETE /api/targets/{name}
     templates/
       base.html
       dashboard.html   # status table with 24h timeline + video thumbnail + lightbox
+      targets.html     # add / test / delete targets (no auto-refresh)
     static/
       input.css    # Tailwind v4 entry point (@import "tailwindcss")
       tailwind.css # pre-built minified CSS — commit this, rebuild when templates change
@@ -144,6 +146,9 @@ target_states: name, target_type, current_status, previous_status,
 -- full history (append-only, auto-purged)
 check_logs: id, target_name, target_type, status, latency_ms,
             checked_at, error_message, screenshot_path
+
+-- targets added from the web UI (config.yaml targets are not stored here)
+targets: name, target_type, config (JSON; dashboard password Fernet-encrypted), created_at
 ```
 
 Schema migrations are handled in `StateTracker._migrate_db()` via `ALTER TABLE ... ADD COLUMN` (safe to run on every startup — catches `OperationalError` if column exists).
@@ -184,12 +189,12 @@ pytest -k "transition"
 
 | File | What it covers |
 |---|---|
-| `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge (13 cases) |
+| `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge, UI targets (17 cases) |
 | `tests/test_ping.py` | PingChecker — real subprocess ping (1 fast + 1 slow) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
 | `tests/test_channels.py` | SMSChannel, TelegramChannel + build_channel (6 cases) |
-| `tests/test_daemon.py` | MonitoringDaemon._run_cycle — alert dispatch, broken channel (3 cases) |
-| `tests/test_web.py` | FastAPI routes via TestClient (8 cases) |
+| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once (7 cases) |
+| `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (22 cases) |
 
 ### Testing rules (from CLAUDE.md)
 - Use real SQLite (`:memory:`) — never mock the DB
@@ -210,7 +215,7 @@ pytest -k "transition"
 | Check current status (JSON) | `curl http://localhost:8000/api/status` |
 | Watch last check video | `open videos/<target_name>.webm` |
 | View check history | `curl http://localhost:8000/api/history/<target_name>` |
-| Add or change a target | Edit `config/config.yaml` then restart the app — config is loaded once at startup |
+| Add or change a target | Use `/targets` in the web UI (live, no restart), or edit `config/config.yaml` then restart — YAML is loaded once at startup |
 
 ---
 

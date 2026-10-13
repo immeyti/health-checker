@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="refresh" content="30" />
+  {% block refresh %}<meta http-equiv="refresh" content="30" />{% endblock %}
   <title>{% block title %}Monitor{% endblock %}</title>
   <link rel="stylesheet" href="/static/tailwind.css">
   <style>
@@ -20,15 +20,21 @@
 
   <header class="border-b border-slate-800/60 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-5">
         <span class="font-semibold text-slate-100 tracking-tight">Dashboard Monitor</span>
+        <nav class="flex items-center gap-4 text-sm">
+          <a href="/" class="text-slate-400 hover:text-slate-100">Status</a>
+          <a href="/targets" class="text-slate-400 hover:text-slate-100">Targets</a>
+        </nav>
       </div>
       <div class="flex items-center gap-4 text-xs text-slate-500">
         <span id="clock" class="font-mono text-slate-400"></span>
+        {% block refresh_note %}
         <span class="flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse-dot"></span>
           Auto-refreshes every 30s
         </span>
+        {% endblock %}
       </div>
       <script>
         (function () {

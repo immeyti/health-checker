@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import socket
 from typing import Literal, Optional
 
 import pytest
 
 from src.channels.base import BaseChannel
 from src.checkers.base import BaseChecker
-from src.config import AlertsConfig, AppConfig, PingTarget, StorageConfig, WebConfig
+from src.checkers.dashboard import DashboardChecker
+from src.config import (
+    AlertsConfig,
+    AppConfig,
+    DashboardTarget,
+    PingTarget,
+    StorageConfig,
+    SuccessIndicator,
+    TcpTarget,
+    WebConfig,
+)
 from src.daemon import MonitoringDaemon
 from src.models import Alert, CheckResult
 from src.state import StateTracker
@@ -120,3 +131,78 @@ async def test_broken_channel_no_crash(state: StateTracker) -> None:
 
     await daemon._run_cycle()
     await daemon._run_cycle()   # triggers alert dispatch to broken channel — must not raise
+
+
+# ---------------------------------------------------------------------------
+# Targets added and removed at runtime
+# ---------------------------------------------------------------------------
+
+
+class CloseRecordingDashboardChecker(DashboardChecker):
+    def __init__(self) -> None:
+        super().__init__(
+            DashboardTarget(
+                name="panel",
+                url="https://panel.example.com/login",
+                username="admin",
+                password="secret",
+                success_indicator=SuccessIndicator(type="url_contains", value="/dashboard"),
+            )
+        )
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class SelfRemovingChecker(FixedResultChecker):
+    """Deletes its own target while the check is in flight."""
+
+    def __init__(self, daemon_ref: list[MonitoringDaemon]) -> None:
+        super().__init__([make_result(name="host-a", status="UP")])
+        self._daemon_ref = daemon_ref
+
+    async def check(self) -> CheckResult:
+        await self._daemon_ref[0].remove_target("host-a")
+        return await super().check()
+
+
+def _closed_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def test_daemon_loads_db_targets_at_startup(minimal_config, state):
+    state.add_target(PingTarget(name="db-host", host="10.0.0.1"))
+    daemon = MonitoringDaemon(config=minimal_config, state=state)
+    assert daemon.has_target("db-host")
+    assert daemon.has_target("loopback")
+
+
+async def test_remove_target_closes_dashboard_browser(state):
+    checker = CloseRecordingDashboardChecker()
+    daemon = _make_daemon([checker], [], state)
+    await daemon.remove_target("panel")
+    assert checker.closed
+    assert not daemon.has_target("panel")
+
+
+async def test_target_removed_mid_check_is_not_recorded(state):
+    daemon_ref: list[MonitoringDaemon] = []
+    daemon = _make_daemon([SelfRemovingChecker(daemon_ref)], [], state)
+    daemon_ref.append(daemon)
+    await daemon._run_cycle()
+    assert state.get_status("host-a") is None
+
+
+async def test_check_once_does_not_record(minimal_config, state):
+    daemon = MonitoringDaemon(config=minimal_config, state=state)
+    result = await daemon.check_once(
+        TcpTarget(name="tcp-test", host="127.0.0.1", port=_closed_port(), timeout=1000)
+    )
+    assert result.status == "DOWN"
+    assert result.error_message == "Connection refused"
+    assert state.get_status("tcp-test") is None

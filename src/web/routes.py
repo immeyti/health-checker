@@ -7,16 +7,20 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
+from ..config import target_host
+from ..daemon import MonitoringDaemon
+from ..models import TargetIn
 from ..state import StateTracker
 
 
 def build_router(
     state: StateTracker,
+    daemon: MonitoringDaemon,
     templates: Jinja2Templates,
     retention_days: int,
     username: str,
     password: str,
-    host_map: dict[str, str] | None = None,
+    host_map: dict[str, str],
 ) -> APIRouter:
     _security = HTTPBasic()
 
@@ -45,7 +49,7 @@ def build_router(
             context={
                 "statuses": statuses,
                 "retention_days": retention_days,
-                "host_map": host_map or {},
+                "host_map": host_map,
             },
         )
 
@@ -69,5 +73,45 @@ def build_router(
         return JSONResponse(
             content=[l.model_dump(mode="json") for l in logs]
         )
+
+    # ------------------------------------------------------------------
+    # Targets managed from the web UI
+    # ------------------------------------------------------------------
+
+    @router.get("/targets", response_class=HTMLResponse)
+    async def targets_page(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="targets.html",
+            context={"targets": state.get_targets(), "host_map": host_map},
+        )
+
+    @router.post("/api/targets", status_code=201)
+    async def add_target(body: TargetIn):
+        if daemon.has_target(body.name):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Target '{body.name}' already exists")
+        target = body.to_target()
+        state.add_target(target)
+        daemon.add_target(target)
+        host_map[target.name] = target_host(target)
+        return {"name": target.name}
+
+    @router.post("/api/targets/test")
+    async def test_target(body: TargetIn):
+        result = await daemon.check_once(body.to_target())
+        return {
+            "status": result.status,
+            "latency_ms": result.latency_ms,
+            "error_message": result.error_message,
+        }
+
+    @router.delete("/api/targets/{target_name}", status_code=204)
+    async def delete_target(target_name: str):
+        if not state.delete_target(target_name):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Target not found or defined in config.yaml"
+            )
+        await daemon.remove_target(target_name)
+        host_map.pop(target_name, None)
 
     return router

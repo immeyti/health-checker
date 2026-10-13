@@ -10,8 +10,8 @@ from .checkers.base import BaseChecker
 from .checkers.dashboard import DashboardChecker
 from .checkers.ping import PingChecker
 from .checkers.tcp import TCPChecker
-from .config import AppConfig
-from .models import Alert
+from .config import AppConfig, DashboardTarget, Target, TcpTarget
+from .models import Alert, CheckResult
 from .state import StateTracker
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,29 @@ class MonitoringDaemon:
     def stop(self) -> None:
         self._running = False
 
+    def has_target(self, name: str) -> bool:
+        return any(c.name == name for c in self._checkers)
+
+    def add_target(self, target: Target) -> None:
+        self._checkers.append(self._make_checker(target))
+
+    async def remove_target(self, name: str) -> None:
+        checker = next(c for c in self._checkers if c.name == name)
+        self._checkers.remove(checker)
+        if isinstance(checker, DashboardChecker):
+            await checker.close()
+
+    async def check_once(self, target: Target) -> CheckResult:
+        """Run a single check without recording it or sending alerts."""
+        checker = self._make_checker(target)
+        if not isinstance(checker, DashboardChecker):
+            return await checker.check()
+        try:
+            async with _PLAYWRIGHT_SEMAPHORE:
+                return await checker.check()
+        finally:
+            await checker.close()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -70,6 +93,9 @@ class MonitoringDaemon:
                     result = await checker.check()
             else:
                 result = await checker.check()
+
+            if checker not in self._checkers:
+                return  # target was deleted while this check was running
 
             alert: Optional[Alert] = self._state.update(result)
             if alert:
@@ -90,14 +116,21 @@ class MonitoringDaemon:
                 logger.error("Channel %s failed to send alert: %s", type(ch).__name__, res)
 
     def _build_checkers(self) -> list[BaseChecker]:
-        checkers: list[BaseChecker] = []
-        for t in self._config.ping_targets:
-            checkers.append(PingChecker(t))
-        for t in self._config.tcp_targets:
-            checkers.append(TCPChecker(t))
-        for t in self._config.dashboard_targets:
-            checkers.append(DashboardChecker(t, screenshots_dir=self._config.storage.screenshots_dir))
-        return checkers
+        c = self._config
+        targets = [
+            *c.ping_targets,
+            *c.tcp_targets,
+            *c.dashboard_targets,
+            *self._state.get_targets(),
+        ]
+        return [self._make_checker(t) for t in targets]
+
+    def _make_checker(self, target: Target) -> BaseChecker:
+        if isinstance(target, DashboardTarget):
+            return DashboardChecker(target, screenshots_dir=self._config.storage.screenshots_dir)
+        if isinstance(target, TcpTarget):
+            return TCPChecker(target)
+        return PingChecker(target)
 
     def _build_channels(self) -> list[BaseChannel]:
         channels: list[BaseChannel] = []

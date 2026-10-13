@@ -42,6 +42,18 @@ class DashboardTarget:
     timeout: int = 15000  # ms
 
 
+Target = PingTarget | TcpTarget | DashboardTarget
+
+
+def target_host(t: Target) -> str:
+    """Address shown under the target name in the web UI."""
+    if isinstance(t, DashboardTarget):
+        return t.url
+    if isinstance(t, TcpTarget):
+        return f"{t.host}:{t.port}"
+    return t.host
+
+
 @dataclass
 class StorageConfig:
     retention_days: int = 30

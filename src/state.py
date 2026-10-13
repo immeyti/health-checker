@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from .config import DashboardTarget, PingTarget, SuccessIndicator, Target, TcpTarget
+from .crypto import decrypt, encrypt
 from .models import Alert, CheckLog, CheckResult, TargetStatus
 
 logger = logging.getLogger(__name__)
@@ -41,6 +45,18 @@ CREATE INDEX IF NOT EXISTS idx_check_logs_target_time
 ON check_logs (target_name, checked_at);
 """
 
+# Targets added from the web UI (config.yaml targets are not stored here)
+_CREATE_TARGETS_TABLE = """
+CREATE TABLE IF NOT EXISTS targets (
+    name        TEXT PRIMARY KEY,
+    target_type TEXT NOT NULL,
+    config      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+"""
+
+_TARGET_TYPES = {"ping": PingTarget, "tcp": TcpTarget, "dashboard": DashboardTarget}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -62,6 +78,7 @@ class StateTracker:
             self._conn.execute(_CREATE_STATES_TABLE)
             self._conn.execute(_CREATE_LOGS_TABLE)
             self._conn.execute(_CREATE_LOGS_INDEX)
+            self._conn.execute(_CREATE_TARGETS_TABLE)
         self._migrate_db()
         logger.info("Database initialised at %s", self._db_path)
 
@@ -225,6 +242,45 @@ class StateTracker:
             )
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Targets managed from the web UI
+    # ------------------------------------------------------------------
+
+    def add_target(self, target: Target) -> None:
+        target_type = next(k for k, cls in _TARGET_TYPES.items() if isinstance(target, cls))
+        cfg = dataclasses.asdict(target)
+        if target_type == "dashboard":
+            cfg["password"] = encrypt(cfg["password"])
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO targets (name, target_type, config, created_at) VALUES (?, ?, ?, ?)",
+                (target.name, target_type, json.dumps(cfg), _now_iso()),
+            )
+
+    def get_targets(self) -> list[Target]:
+        rows = self._conn.execute(
+            "SELECT target_type, config FROM targets ORDER BY name"
+        ).fetchall()
+        targets: list[Target] = []
+        for r in rows:
+            cfg = json.loads(r["config"])
+            if r["target_type"] == "dashboard":
+                cfg["password"] = decrypt(cfg["password"])
+                cfg["success_indicator"] = SuccessIndicator(**cfg["success_indicator"])
+            targets.append(_TARGET_TYPES[r["target_type"]](**cfg))
+        return targets
+
+    def delete_target(self, name: str) -> bool:
+        """Remove a UI-added target with its state and history. False if it isn't one."""
+        with self._conn:
+            deleted = self._conn.execute(
+                "DELETE FROM targets WHERE name = ?", (name,)
+            ).rowcount
+            if deleted:
+                self._conn.execute("DELETE FROM target_states WHERE name = ?", (name,))
+                self._conn.execute("DELETE FROM check_logs WHERE target_name = ?", (name,))
+        return bool(deleted)
 
     # ------------------------------------------------------------------
     # Maintenance

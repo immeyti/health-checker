@@ -7,6 +7,7 @@ import httpx
 from typing import Optional
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from src.config import (
@@ -18,6 +19,7 @@ from src.config import (
     SuccessIndicator,
     WebConfig,
 )
+from src.daemon import MonitoringDaemon
 from src.models import CheckResult
 from src.state import StateTracker
 from src.web.app import create_app
@@ -54,6 +56,11 @@ def make_result(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def secret_key(monkeypatch) -> None:
+    monkeypatch.setenv("MONITOR_SECRET_KEY", Fernet.generate_key().decode())
+
+
 @pytest.fixture
 def state() -> StateTracker:
     tracker = StateTracker(db_path=":memory:")
@@ -80,12 +87,19 @@ def seeded_state(state: StateTracker) -> StateTracker:
     return state
 
 
-def _make_app(state: StateTracker, tmp_path):
+@pytest.fixture
+def daemon(minimal_config: AppConfig, seeded_state: StateTracker) -> MonitoringDaemon:
+    """Real daemon (never run) holding the config.yaml target "loopback"."""
+    return MonitoringDaemon(config=minimal_config, state=seeded_state)
+
+
+def _make_app(state: StateTracker, daemon: MonitoringDaemon, tmp_path):
     os.environ["MONITOR_USERNAME"] = TEST_USERNAME
     os.environ["MONITOR_PASSWORD"] = TEST_PASSWORD
     try:
         return create_app(
             state=state,
+            daemon=daemon,
             retention_days=30,
             screenshots_dir=str(tmp_path / "screenshots"),
         )
@@ -95,14 +109,14 @@ def _make_app(state: StateTracker, tmp_path):
 
 
 @pytest.fixture
-def web_client(seeded_state: StateTracker, tmp_path) -> TestClient:
-    app = _make_app(seeded_state, tmp_path)
+def web_client(seeded_state: StateTracker, daemon: MonitoringDaemon, tmp_path) -> TestClient:
+    app = _make_app(seeded_state, daemon, tmp_path)
     client = TestClient(app, raise_server_exceptions=True)
     client.auth = httpx.BasicAuth(TEST_USERNAME, TEST_PASSWORD)
     return client
 
 
 @pytest.fixture
-def unauthenticated_client(seeded_state: StateTracker, tmp_path) -> TestClient:
-    app = _make_app(seeded_state, tmp_path)
+def unauthenticated_client(seeded_state: StateTracker, daemon: MonitoringDaemon, tmp_path) -> TestClient:
+    app = _make_app(seeded_state, daemon, tmp_path)
     return TestClient(app, raise_server_exceptions=False)

@@ -17,6 +17,7 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 - **REST API** — `/api/status`, `/api/history/{target}` for external consumers
 - **SMS alerts** on UP↔DOWN transitions via [Kavenegar](https://kavenegar.com) or [Twilio](https://twilio.com)
 - **Telegram alerts** via a bot to one or more chat IDs
+- **Manage targets from the web UI** — add, test and delete targets at `/targets` without a restart
 - **HTTP Basic Auth** on the web UI
 - **Docker-first** — single `docker compose up -d` to run everything
 
@@ -118,6 +119,12 @@ DASHBOARD_PASSWORD=your_dashboard_password
 
 `${VAR_NAME}` in `config.yaml` is automatically interpolated from the environment at startup.
 
+### Managing targets from the web UI
+
+Open `/targets` to add a ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
+
+Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (required in `.env`). If the key changes or is lost, those passwords can't be decrypted and the targets must be re-added.
+
 ---
 
 ## REST API
@@ -127,6 +134,9 @@ DASHBOARD_PASSWORD=your_dashboard_password
 | `GET /api/status` | Current status of all targets |
 | `GET /api/status/{name}` | Status of a single target |
 | `GET /api/history/{name}` | Check log for a target (`?limit=100&offset=0`) |
+| `POST /api/targets` | Add a target (JSON body with `type`: `ping` / `tcp` / `dashboard`) |
+| `POST /api/targets/test` | Run one check for a target without saving it |
+| `DELETE /api/targets/{name}` | Delete a target added from the UI |
 
 All endpoints require HTTP Basic Auth with the same credentials as the web UI.
 
