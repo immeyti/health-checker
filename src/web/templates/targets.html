@@ -32,9 +32,16 @@
 
       <div>
         <p class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">1 · What to check</p>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label class="type-card cursor-pointer">
-            <input type="radio" name="type" value="dashboard" class="sr-only" checked>
+            <input type="radio" name="type" value="http" class="sr-only" checked>
+            <div class="h-full rounded-xl border border-slate-700 p-4 transition-colors hover:border-slate-500">
+              <p class="type-title font-semibold text-slate-200 text-sm">Website (HTTP)</p>
+              <p class="text-xs text-slate-500 mt-1">Does the page load without an error like 500 or 404?</p>
+            </div>
+          </label>
+          <label class="type-card cursor-pointer">
+            <input type="radio" name="type" value="dashboard" class="sr-only">
             <div class="h-full rounded-xl border border-slate-700 p-4 transition-colors hover:border-slate-500">
               <p class="type-title font-semibold text-slate-200 text-sm">Dashboard login</p>
               <p class="text-xs text-slate-500 mt-1">Logs in with a real browser and checks it worked</p>
@@ -64,6 +71,26 @@
           <input name="name" required class="field" placeholder="e.g. Sales Panel">
           <span class="text-xs text-slate-500">Shown on the status page. Must be unique.</span>
         </label>
+
+        <fieldset data-type="http" class="grid gap-4">
+          <label class="grid gap-1.5 text-sm text-slate-300">Page URL
+            <input name="url" type="url" required class="field font-mono" placeholder="https://example.com">
+            <span class="text-xs text-slate-500">DOWN on status 400 or above, timeout, or SSL error. Redirects are followed.</span>
+          </label>
+          <div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Must contain <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="expected_text" class="field font-mono" placeholder="Welcome">
+              <span class="text-xs text-slate-500">DOWN if this text is missing from the page.</span>
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Must not contain <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="forbidden_text" class="field font-mono" placeholder="Database error">
+              <span class="text-xs text-slate-500">DOWN if this text appears on the page.</span>
+            </label>
+          </div>
+          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
+            <input name="timeout" type="number" min="1" value="10000" class="field">
+          </label>
+        </fieldset>
 
         <fieldset data-type="dashboard" class="grid gap-4">
           <label class="grid gap-1.5 text-sm text-slate-300">Login page URL
@@ -143,7 +170,7 @@
             <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ host_map.get(t.name, "") }}</p>
           </div>
           <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-            {{ "dashboard" if t.url is defined else ("tcp" if t.port is defined else "ping") }}
+            {{ "dashboard" if t.username is defined else "http" if t.url is defined else "tcp" if t.port is defined else "ping" }}
           </span>
           <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
                   data-name="{{ t.name }}">Delete</button>

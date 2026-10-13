@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.config import DashboardTarget, PingTarget, SuccessIndicator, TcpTarget
+from src.config import DashboardTarget, HttpTarget, PingTarget, SuccessIndicator, TcpTarget
 from src.state import StateTracker
 from tests.conftest import make_result
 
@@ -123,6 +123,7 @@ def _dashboard_target(name: str = "panel") -> DashboardTarget:
 
 def test_add_and_get_targets_roundtrip(state):
     targets = [
+        HttpTarget(name="http-a", url="https://site.example.com", forbidden_text="Error", timeout=3000),
         _dashboard_target(),
         PingTarget(name="ping-a", host="10.0.0.1"),
         TcpTarget(name="tcp-a", host="10.0.0.2", port=443, timeout=3000),

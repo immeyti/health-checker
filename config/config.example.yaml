@@ -14,6 +14,13 @@ targets:
       port: 443
       timeout: 5000
 
+  http:
+    - name: "My Website"
+      url: "https://example.com"
+      expected_text: ""     # optional — DOWN if this text is missing from the page
+      forbidden_text: ""    # optional — DOWN if this text appears on the page
+      timeout: 10000        # ms
+
   dashboards:
     - name: "My Dashboard"
       url: "https://example.com/login"

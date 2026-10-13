@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from .config import DashboardTarget, PingTarget, SuccessIndicator, Target, TcpTarget
+from .config import DashboardTarget, HttpTarget, PingTarget, SuccessIndicator, Target, TcpTarget
 from .crypto import decrypt, encrypt
 from .models import Alert, CheckLog, CheckResult, TargetStatus
 
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS targets (
 );
 """
 
-_TARGET_TYPES = {"ping": PingTarget, "tcp": TcpTarget, "dashboard": DashboardTarget}
+_TARGET_TYPES = {"ping": PingTarget, "tcp": TcpTarget, "dashboard": DashboardTarget, "http": HttpTarget}
 
 
 def _now_iso() -> str:

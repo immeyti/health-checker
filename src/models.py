@@ -5,12 +5,12 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .config import DashboardTarget, PingTarget, SuccessIndicator, TcpTarget
+from .config import DashboardTarget, HttpTarget, PingTarget, SuccessIndicator, TcpTarget
 
 
 class CheckResult(BaseModel):
     target_name: str
-    target_type: Literal["ping", "dashboard", "tcp"]
+    target_type: Literal["ping", "dashboard", "tcp", "http"]
     status: Literal["UP", "DOWN"]
     latency_ms: Optional[float] = None
     checked_at: datetime
@@ -100,4 +100,24 @@ class DashboardTargetIn(BaseModel):
         )
 
 
-TargetIn = Annotated[PingTargetIn | TcpTargetIn | DashboardTargetIn, Field(discriminator="type")]
+class HttpTargetIn(BaseModel):
+    type: Literal["http"]
+    name: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https?://")
+    expected_text: str = ""
+    forbidden_text: str = ""
+    timeout: int = Field(default=10000, gt=0)
+
+    def to_target(self) -> HttpTarget:
+        return HttpTarget(
+            name=self.name,
+            url=self.url,
+            expected_text=self.expected_text,
+            forbidden_text=self.forbidden_text,
+            timeout=self.timeout,
+        )
+
+
+TargetIn = Annotated[
+    PingTargetIn | TcpTargetIn | DashboardTargetIn | HttpTargetIn, Field(discriminator="type")
+]

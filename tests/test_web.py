@@ -189,3 +189,15 @@ def test_target_routes_require_auth(unauthenticated_client: TestClient, method: 
     response = unauthenticated_client.request(method, path, json=PING_BODY)
     assert response.status_code == 401
 
+
+def test_add_http_target(web_client: TestClient, daemon) -> None:
+    body = {"type": "http", "name": "site", "url": "https://site.example.com", "expected_text": "Welcome"}
+    response = web_client.post("/api/targets", json=body)
+    assert response.status_code == 201
+    assert daemon.has_target("site")
+    assert "https://site.example.com" in web_client.get("/targets").text
+
+
+def test_add_http_target_without_scheme_422(web_client: TestClient) -> None:
+    body = {"type": "http", "name": "site", "url": "site.example.com"}
+    assert web_client.post("/api/targets", json=body).status_code == 422

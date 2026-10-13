@@ -10,6 +10,7 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 
 - **ICMP ping** monitoring with latency tracking
 - **TCP port** checks with configurable timeout
+- **HTTP** checks — DOWN on status ≥ 400, timeout or SSL error; optional must-contain / must-not-contain text
 - **Dashboard login** checks — drives a real Chromium browser, fills the login form, verifies a success condition (URL change, element, text)
 - **Video recording** — every dashboard check saves a `.webm` video; the last video per target is always available in the web UI
 - **SQLite storage** — append-only check log with configurable retention (default 30 days)
@@ -79,6 +80,13 @@ targets:
       port: 443
       timeout: 5000   # ms
 
+  http:
+    - name: "My Website"
+      url: "https://example.com"
+      expected_text: "Welcome"        # optional — DOWN if missing
+      forbidden_text: "Database error" # optional — DOWN if present
+      timeout: 10000  # ms
+
   dashboards:
     - name: "My Dashboard"
       url: "https://example.com/login"
@@ -121,7 +129,7 @@ DASHBOARD_PASSWORD=your_dashboard_password
 
 ### Managing targets from the web UI
 
-Open `/targets` to add a ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
+Open `/targets` to add an HTTP, ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
 
 Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (required in `.env`). If the key changes or is lost, those passwords can't be decrypted and the targets must be re-added.
 
@@ -134,7 +142,7 @@ Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (r
 | `GET /api/status` | Current status of all targets |
 | `GET /api/status/{name}` | Status of a single target |
 | `GET /api/history/{name}` | Check log for a target (`?limit=100&offset=0`) |
-| `POST /api/targets` | Add a target (JSON body with `type`: `ping` / `tcp` / `dashboard`) |
+| `POST /api/targets` | Add a target (JSON body with `type`: `http` / `ping` / `tcp` / `dashboard`) |
 | `POST /api/targets/test` | Run one check for a target without saving it |
 | `DELETE /api/targets/{name}` | Delete a target added from the UI |
 
@@ -167,6 +175,7 @@ src/
   checkers/
     ping.py          # ICMP via asyncio subprocess
     tcp.py           # TCP connect check
+    http.py          # HTTP GET — status code + optional body text checks
     dashboard.py     # Playwright login + video recording
 
   channels/
@@ -208,7 +217,6 @@ pytest                  # full suite including real network tests
 - [ ] **Alert after N failures** — `consecutive_failures` column already tracked in the DB; wire it up in the daemon
 - [ ] **Recovery alerts** — send an explicit "back UP" SMS when a target recovers
 - [ ] **Email / webhook channels** — the channel interface is ready; just needs new implementations
-- [ ] **HTTP endpoint checker** — check a URL's HTTP status code without a full browser login (lighter than Playwright for simple APIs)
 - [ ] **Prometheus metrics endpoint** — expose check results as Gauge metrics for Grafana dashboards
 - [ ] **Config hot-reload** — watch `config.yaml` for changes and apply without a restart
 - [ ] **HTTPS for the web UI** — TLS termination, either built-in or documented reverse-proxy setup (nginx/Caddy)

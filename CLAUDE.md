@@ -40,6 +40,8 @@ src/
   checkers/
     base.py        # abstract BaseChecker
     ping.py        # ICMP via asyncio subprocess
+    tcp.py         # TCP connect check
+    http.py        # HTTP GET — DOWN on status >= 400, timeout, SSL error, expected/forbidden text
     dashboard.py   # Playwright login check + video recording
 
   channels/
@@ -191,10 +193,11 @@ pytest -k "transition"
 |---|---|
 | `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge, UI targets (17 cases) |
 | `tests/test_ping.py` | PingChecker — real subprocess ping (1 fast + 1 slow) |
+| `tests/test_http.py` | HTTPChecker — status codes, redirects, timeout, body text (respx) (8 cases) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
 | `tests/test_channels.py` | SMSChannel, TelegramChannel + build_channel (6 cases) |
 | `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once (7 cases) |
-| `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (22 cases) |
+| `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (24 cases) |
 
 ### Testing rules (from CLAUDE.md)
 - Use real SQLite (`:memory:`) — never mock the DB

@@ -18,5 +18,5 @@ class BaseChecker(ABC):
 
     @property
     @abstractmethod
-    def target_type(self) -> Literal["ping", "dashboard", "tcp"]:
+    def target_type(self) -> Literal["ping", "dashboard", "tcp", "http"]:
         ...

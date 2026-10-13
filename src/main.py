@@ -67,6 +67,7 @@ async def _main(args: argparse.Namespace) -> None:
             *config.ping_targets,
             *config.tcp_targets,
             *config.dashboard_targets,
+            *config.http_targets,
             *state.get_targets(),
         ]
     }

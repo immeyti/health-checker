@@ -8,9 +8,10 @@ from typing import Optional
 from .channels import BaseChannel, build_channel
 from .checkers.base import BaseChecker
 from .checkers.dashboard import DashboardChecker
+from .checkers.http import HTTPChecker
 from .checkers.ping import PingChecker
 from .checkers.tcp import TCPChecker
-from .config import AppConfig, DashboardTarget, Target, TcpTarget
+from .config import AppConfig, DashboardTarget, HttpTarget, Target, TcpTarget
 from .models import Alert, CheckResult
 from .state import StateTracker
 
@@ -121,6 +122,7 @@ class MonitoringDaemon:
             *c.ping_targets,
             *c.tcp_targets,
             *c.dashboard_targets,
+            *c.http_targets,
             *self._state.get_targets(),
         ]
         return [self._make_checker(t) for t in targets]
@@ -130,6 +132,8 @@ class MonitoringDaemon:
             return DashboardChecker(target, screenshots_dir=self._config.storage.screenshots_dir)
         if isinstance(target, TcpTarget):
             return TCPChecker(target)
+        if isinstance(target, HttpTarget):
+            return HTTPChecker(target)
         return PingChecker(target)
 
     def _build_channels(self) -> list[BaseChannel]:

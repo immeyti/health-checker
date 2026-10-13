@@ -42,12 +42,21 @@ class DashboardTarget:
     timeout: int = 15000  # ms
 
 
-Target = PingTarget | TcpTarget | DashboardTarget
+@dataclass
+class HttpTarget:
+    name: str
+    url: str
+    expected_text: str = ""   # DOWN if missing from the response body
+    forbidden_text: str = ""  # DOWN if present in the response body
+    timeout: int = 10000  # ms
+
+
+Target = PingTarget | TcpTarget | DashboardTarget | HttpTarget
 
 
 def target_host(t: Target) -> str:
     """Address shown under the target name in the web UI."""
-    if isinstance(t, DashboardTarget):
+    if isinstance(t, (DashboardTarget, HttpTarget)):
         return t.url
     if isinstance(t, TcpTarget):
         return f"{t.host}:{t.port}"
@@ -83,6 +92,7 @@ class AppConfig:
     ping_targets: list[PingTarget]
     tcp_targets: list[TcpTarget] = field(default_factory=list)
     dashboard_targets: list[DashboardTarget] = field(default_factory=list)
+    http_targets: list[HttpTarget] = field(default_factory=list)
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     web: WebConfig = field(default_factory=WebConfig)
@@ -145,6 +155,17 @@ def load_config(path: str) -> AppConfig:
         for t in targets_raw.get("tcp", [])
     ]
 
+    http_targets = [
+        HttpTarget(
+            name=t["name"],
+            url=t["url"],
+            expected_text=t.get("expected_text", ""),
+            forbidden_text=t.get("forbidden_text", ""),
+            timeout=t.get("timeout", 10000),
+        )
+        for t in targets_raw.get("http", [])
+    ]
+
     dashboard_targets = []
     for t in targets_raw.get("dashboards", []):
         si_raw = t.get("success_indicator", {})
@@ -174,6 +195,7 @@ def load_config(path: str) -> AppConfig:
         ping_targets=ping_targets,
         tcp_targets=tcp_targets,
         dashboard_targets=dashboard_targets,
+        http_targets=http_targets,
         alerts=alerts,
         storage=storage,
         web=web,
