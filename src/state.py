@@ -45,6 +45,16 @@ CREATE INDEX IF NOT EXISTS idx_check_logs_target_time
 ON check_logs (target_name, checked_at);
 """
 
+# Alert channels added from the web UI (bot token Fernet-encrypted)
+_CREATE_CHANNELS_TABLE = """
+CREATE TABLE IF NOT EXISTS alert_channels (
+    name         TEXT PRIMARY KEY,
+    channel_type TEXT NOT NULL,
+    config       TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+"""
+
 # Targets added from the web UI (config.yaml targets are not stored here)
 _CREATE_TARGETS_TABLE = """
 CREATE TABLE IF NOT EXISTS targets (
@@ -79,6 +89,7 @@ class StateTracker:
             self._conn.execute(_CREATE_LOGS_TABLE)
             self._conn.execute(_CREATE_LOGS_INDEX)
             self._conn.execute(_CREATE_TARGETS_TABLE)
+            self._conn.execute(_CREATE_CHANNELS_TABLE)
         self._migrate_db()
         logger.info("Database initialised at %s", self._db_path)
 
@@ -281,6 +292,40 @@ class StateTracker:
                 self._conn.execute("DELETE FROM target_states WHERE name = ?", (name,))
                 self._conn.execute("DELETE FROM check_logs WHERE target_name = ?", (name,))
         return bool(deleted)
+
+    # ------------------------------------------------------------------
+    # Alert channels managed from the web UI
+    # ------------------------------------------------------------------
+
+    def add_channel(self, name: str, channel_type: str, bot_token: str, chat_ids: list[str]) -> None:
+        cfg = {"bot_token": encrypt(bot_token), "chat_ids": chat_ids}
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO alert_channels (name, channel_type, config, created_at) VALUES (?, ?, ?, ?)",
+                (name, channel_type, json.dumps(cfg), _now_iso()),
+            )
+
+    def get_channels(self) -> list[dict]:
+        """UI-added channels as {name, type, bot_token, chat_ids} with the token decrypted."""
+        rows = self._conn.execute(
+            "SELECT name, channel_type, config FROM alert_channels ORDER BY name"
+        ).fetchall()
+        channels = []
+        for r in rows:
+            cfg = json.loads(r["config"])
+            channels.append({
+                "name": r["name"],
+                "type": r["channel_type"],
+                "bot_token": decrypt(cfg["bot_token"]),
+                "chat_ids": cfg["chat_ids"],
+            })
+        return channels
+
+    def delete_channel(self, name: str) -> bool:
+        with self._conn:
+            return bool(
+                self._conn.execute("DELETE FROM alert_channels WHERE name = ?", (name,)).rowcount
+            )
 
     # ------------------------------------------------------------------
     # Maintenance

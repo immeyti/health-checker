@@ -127,6 +127,10 @@ DASHBOARD_PASSWORD=your_dashboard_password
 
 `${VAR_NAME}` in `config.yaml` is automatically interpolated from the environment at startup.
 
+### Managing alert channels from the web UI
+
+Open `/channels` to add Telegram or Bale channels (bot token + chat IDs). Tokens are stored encrypted with `MONITOR_SECRET_KEY` and apply immediately. SMS channels are still configured in `config.yaml`.
+
 ### Managing targets from the web UI
 
 Open `/targets` to add an HTTP, ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.

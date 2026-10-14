@@ -55,7 +55,7 @@ src/
 
   web/
     app.py         # FastAPI factory — mounts /static, /screenshots, /videos static dirs
-    routes.py      # GET /, /api/status, /api/history/{name}; GET /targets, POST /api/targets[/test], DELETE /api/targets/{name}
+    routes.py      # GET /, /api/status, /api/history/{name}; GET /targets, POST /api/targets[/test], DELETE /api/targets/{name}; GET /channels, POST /api/channels, DELETE /api/channels/{name}
     templates/
       base.html
       dashboard.html   # status table with 24h timeline + video thumbnail + lightbox
@@ -148,6 +148,9 @@ target_states: name, target_type, current_status, previous_status,
 -- full history (append-only, auto-purged)
 check_logs: id, target_name, target_type, status, latency_ms,
             checked_at, error_message, screenshot_path
+
+-- alert channels added from the web UI (Telegram/Bale; bot_token Fernet-encrypted)
+alert_channels: name, channel_type, config (JSON), created_at
 
 -- targets added from the web UI (config.yaml targets are not stored here)
 targets: name, target_type, config (JSON; dashboard password Fernet-encrypted), created_at
