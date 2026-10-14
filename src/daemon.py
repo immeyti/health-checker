@@ -99,11 +99,21 @@ class MonitoringDaemon:
 
     async def _check_target(self, checker: BaseChecker) -> None:
         try:
-            if checker.target_type == "dashboard":
-                async with _PLAYWRIGHT_SEMAPHORE:
-                    result = await checker.check()
-            else:
-                result = await checker.check()
+            result = await self._run_check(checker)
+            retries = (
+                self._config.dashboard_retries
+                if checker.target_type == "dashboard"
+                else self._config.retries
+            )
+            for attempt in range(1, retries + 1):
+                if result.status == "UP" or checker not in self._checkers:
+                    break
+                logger.info(
+                    "Retry %d/%d for %s after DOWN (%s)",
+                    attempt, retries, checker.name, result.error_message,
+                )
+                await asyncio.sleep(self._config.retry_delay)
+                result = await self._run_check(checker)
 
             if checker not in self._checkers:
                 return  # target was deleted while this check was running
@@ -115,6 +125,12 @@ class MonitoringDaemon:
             logger.error(
                 "Unexpected error checking %s: %s", checker.name, exc, exc_info=True
             )
+
+    async def _run_check(self, checker: BaseChecker) -> CheckResult:
+        if checker.target_type == "dashboard":
+            async with _PLAYWRIGHT_SEMAPHORE:
+                return await checker.check()
+        return await checker.check()
 
     async def _dispatch_alert(self, alert: Alert) -> None:
         channels = [*self._channels, *self._ui_channels.values()]

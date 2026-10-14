@@ -65,6 +65,9 @@ python3 -m src.main
 
 ```yaml
 check_interval: 300   # seconds between full monitoring cycles
+retries: 2            # re-check a DOWN target before recording it (avoids alerts on momentary blips)
+dashboard_retries: 1  # retries for dashboard logins
+retry_delay: 10       # seconds between attempts
 
 storage:
   retention_days: 30

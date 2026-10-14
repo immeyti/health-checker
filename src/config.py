@@ -96,6 +96,10 @@ class AppConfig:
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    # Re-check a DOWN target before recording it, to ride out momentary blips
+    retries: int = 2
+    dashboard_retries: int = 1  # dashboard checks are slow (browser login)
+    retry_delay: int = 10  # seconds between attempts
 
 
 def _interpolate(value: Any) -> Any:
@@ -192,6 +196,9 @@ def load_config(path: str) -> AppConfig:
 
     return AppConfig(
         check_interval=check_interval,
+        retries=raw.get("retries", 2),
+        dashboard_retries=raw.get("dashboard_retries", 1),
+        retry_delay=raw.get("retry_delay", 10),
         ping_targets=ping_targets,
         tcp_targets=tcp_targets,
         dashboard_targets=dashboard_targets,

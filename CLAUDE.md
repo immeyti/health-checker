@@ -115,6 +115,7 @@ alerts:
 - `target_states` — one row per target, upserted each cycle (current status)
 - `check_logs` — append-only history, purged after `retention_days`
 - **No alert on first check** — alert only on UP↔DOWN transition
+- **Retries before DOWN** — a failed check is retried `retries` times (`dashboard_retries` for dashboards) `retry_delay` seconds apart; DOWN is recorded only if every attempt fails. The UI Test button does not retry
 - `consecutive_failures` column available for future "alert after N failures" logic
 
 ### Dashboard checker (`checkers/dashboard.py`)
@@ -199,7 +200,7 @@ pytest -k "transition"
 | `tests/test_http.py` | HTTPChecker — status codes, redirects, timeout, body text (respx) (8 cases) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
 | `tests/test_channels.py` | SMSChannel, TelegramChannel (incl. forum topic) + build_channel (7 cases) |
-| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once (7 cases) |
+| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once, retries (10 cases) |
 | `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (24 cases) |
 
 ### Testing rules (from CLAUDE.md)

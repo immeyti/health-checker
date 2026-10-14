@@ -1,4 +1,7 @@
 check_interval: 300  # seconds between each monitoring cycle
+retries: 2           # re-check a DOWN target this many times before recording DOWN
+dashboard_retries: 1 # same for dashboard logins (each attempt can take up to a minute)
+retry_delay: 10      # seconds between attempts
 
 storage:
   retention_days: 30  # keep check logs for this many days

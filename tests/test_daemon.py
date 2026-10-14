@@ -72,6 +72,8 @@ def _make_daemon(
     checkers: list[BaseChecker],
     channels: list[BaseChannel],
     state: StateTracker,
+    retries: int = 0,
+    dashboard_retries: int = 0,
 ) -> MonitoringDaemon:
     """Build a MonitoringDaemon without calling _build_checkers()/_build_channels()."""
     config = AppConfig(
@@ -81,6 +83,9 @@ def _make_daemon(
         alerts=AlertsConfig(channels=[]),
         storage=StorageConfig(retention_days=30, screenshots_dir="screenshots"),
         web=WebConfig(host="127.0.0.1", port=8000),
+        retries=retries,
+        dashboard_retries=dashboard_retries,
+        retry_delay=0,
     )
     daemon = object.__new__(MonitoringDaemon)
     daemon._config = config
@@ -225,3 +230,61 @@ def test_daemon_loads_db_channels_at_startup(minimal_config, state):
     state.add_channel("ops", "telegram", "123:TOKEN", ["42"])
     daemon = MonitoringDaemon(config=minimal_config, state=state)
     assert daemon.has_channel("ops")
+
+
+# ---------------------------------------------------------------------------
+# Retries before recording DOWN
+# ---------------------------------------------------------------------------
+
+
+class CountingChecker(FixedResultChecker):
+    def __init__(self, results: list[CheckResult], target_type: str = "ping") -> None:
+        super().__init__(results)
+        self.calls = 0
+        self._type = target_type
+
+    async def check(self) -> CheckResult:
+        self.calls += 1
+        return await super().check()
+
+    @property
+    def target_type(self):
+        return self._type
+
+
+async def test_retry_recovers_blip_without_alert(state: StateTracker) -> None:
+    checker = CountingChecker([make_result(status="UP"), make_result(status="DOWN"), make_result(status="UP")])
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [channel], state, retries=2)
+
+    await daemon._run_cycle()  # first check: UP
+    await daemon._run_cycle()  # DOWN, then UP on the first retry
+
+    assert checker.calls == 3
+    assert state.get_status("host-a").current_status == "UP"
+    assert [log.status for log in state.get_history("host-a")] == ["UP", "UP"]
+    assert channel.sent_alerts == []
+
+
+async def test_down_after_all_retries_alerts(state: StateTracker) -> None:
+    results = [make_result(status="UP")] + [make_result(status="DOWN")] * 3
+    checker = CountingChecker(results)
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [channel], state, retries=2)
+
+    await daemon._run_cycle()
+    await daemon._run_cycle()
+
+    assert checker.calls == 4
+    assert state.get_status("host-a").current_status == "DOWN"
+    assert len(channel.sent_alerts) == 1
+    assert channel.sent_alerts[0].transition == "UP_TO_DOWN"
+
+
+async def test_dashboard_uses_dashboard_retries(state: StateTracker) -> None:
+    checker = CountingChecker([make_result(status="DOWN")] * 3, target_type="dashboard")
+    daemon = _make_daemon([checker], [], state, retries=2, dashboard_retries=1)
+
+    await daemon._run_cycle()
+
+    assert checker.calls == 2
