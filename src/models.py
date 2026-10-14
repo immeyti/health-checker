@@ -121,3 +121,22 @@ class HttpTargetIn(BaseModel):
 TargetIn = Annotated[
     PingTargetIn | TcpTargetIn | DashboardTargetIn | HttpTargetIn, Field(discriminator="type")
 ]
+
+
+# ---------------------------------------------------------------------------
+# Web UI input for adding an alert channel
+# ---------------------------------------------------------------------------
+
+
+class ChannelIn(BaseModel):
+    type: Literal["telegram", "bale"]
+    name: str = Field(min_length=1)
+    bot_token: str = Field(min_length=1)
+    chat_ids: list[str] = Field(min_length=1)
+
+    def to_channel_config(self) -> dict:
+        return {
+            "type": self.type,
+            "chat_ids": self.chat_ids,
+            self.type: {"bot_token": self.bot_token},
+        }

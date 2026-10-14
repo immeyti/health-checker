@@ -27,6 +27,7 @@ class MonitoringDaemon:
         self._state = state
         self._checkers: list[BaseChecker] = self._build_checkers()
         self._channels: list[BaseChannel] = self._build_channels()
+        self._ui_channels: dict[str, BaseChannel] = self._build_ui_channels()
         self._running = False
 
     # ------------------------------------------------------------------
@@ -64,6 +65,15 @@ class MonitoringDaemon:
         self._checkers.remove(checker)
         if isinstance(checker, DashboardChecker):
             await checker.close()
+
+    def has_channel(self, name: str) -> bool:
+        return name in self._ui_channels
+
+    def add_channel(self, name: str, config: dict) -> None:
+        self._ui_channels[name] = build_channel(config)
+
+    def remove_channel(self, name: str) -> None:
+        self._ui_channels.pop(name, None)
 
     async def check_once(self, target: Target) -> CheckResult:
         """Run a single check without recording it or sending alerts."""
@@ -107,12 +117,13 @@ class MonitoringDaemon:
             )
 
     async def _dispatch_alert(self, alert: Alert) -> None:
-        if not self._channels:
+        channels = [*self._channels, *self._ui_channels.values()]
+        if not channels:
             logger.warning("Alert triggered but no channels configured: %s", alert.message)
             return
-        tasks = [ch.send(alert) for ch in self._channels]
+        tasks = [ch.send(alert) for ch in channels]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for ch, res in zip(self._channels, results):
+        for ch, res in zip(channels, results):
             if isinstance(res, Exception):
                 logger.error("Channel %s failed to send alert: %s", type(ch).__name__, res)
 
@@ -143,6 +154,16 @@ class MonitoringDaemon:
                 channels.append(build_channel(ch_cfg.raw))
             except Exception as exc:
                 logger.error("Failed to build channel %s: %s", ch_cfg.type, exc)
+        return channels
+
+    def _build_ui_channels(self) -> dict[str, BaseChannel]:
+        channels: dict[str, BaseChannel] = {}
+        for c in self._state.get_channels():
+            cfg = {"type": c["type"], "chat_ids": c["chat_ids"], c["type"]: {"bot_token": c["bot_token"]}}
+            try:
+                channels[c["name"]] = build_channel(cfg)
+            except Exception as exc:
+                logger.error("Failed to build channel %s: %s", c["name"], exc)
         return channels
 
     async def _shutdown(self) -> None:

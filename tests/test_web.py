@@ -201,3 +201,50 @@ def test_add_http_target(web_client: TestClient, daemon) -> None:
 def test_add_http_target_without_scheme_422(web_client: TestClient) -> None:
     body = {"type": "http", "name": "site", "url": "site.example.com"}
     assert web_client.post("/api/targets", json=body).status_code == 422
+
+
+CHANNEL_BODY = {"type": "telegram", "name": "ops", "bot_token": "123:SECRET", "chat_ids": ["42"]}
+
+
+def test_channels_page_has_no_auto_refresh(web_client: TestClient) -> None:
+    response = web_client.get("/channels")
+    assert response.status_code == 200
+    assert 'http-equiv="refresh"' not in response.text
+
+
+def test_add_channel(web_client: TestClient, daemon) -> None:
+    response = web_client.post("/api/channels", json=CHANNEL_BODY)
+    assert response.status_code == 201
+    assert daemon.has_channel("ops")
+    page = web_client.get("/channels").text
+    assert "ops" in page
+    assert "SECRET" not in page
+
+
+def test_add_channel_twice_conflicts(web_client: TestClient) -> None:
+    web_client.post("/api/channels", json=CHANNEL_BODY)
+    assert web_client.post("/api/channels", json=CHANNEL_BODY).status_code == 409
+
+
+def test_add_channel_without_chat_ids_422(web_client: TestClient) -> None:
+    response = web_client.post("/api/channels", json={**CHANNEL_BODY, "chat_ids": []})
+    assert response.status_code == 422
+
+
+def test_delete_channel(web_client: TestClient, daemon) -> None:
+    web_client.post("/api/channels", json=CHANNEL_BODY)
+    assert web_client.delete("/api/channels/ops").status_code == 204
+    assert not daemon.has_channel("ops")
+    assert web_client.delete("/api/channels/ops").status_code == 404
+
+
+def test_channel_token_is_encrypted_at_rest(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/channels", json=CHANNEL_BODY)
+    raw = seeded_state._conn.execute("SELECT config FROM alert_channels").fetchone()["config"]
+    assert "SECRET" not in raw
+    assert seeded_state.get_channels()[0]["bot_token"] == "123:SECRET"
+
+
+@pytest.mark.parametrize("method,path", [("get", "/channels"), ("post", "/api/channels"), ("delete", "/api/channels/x")])
+def test_channel_routes_require_auth(unauthenticated_client: TestClient, method: str, path: str) -> None:
+    assert getattr(unauthenticated_client, method)(path).status_code == 401

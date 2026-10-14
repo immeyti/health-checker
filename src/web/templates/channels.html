@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Monitor — Alerts{% endblock %}
+
+{# No auto-refresh here — it would wipe the form while typing #}
+{% block refresh %}{% endblock %}
+{% block refresh_note %}{% endblock %}
+
+{% block extra_styles %}
+  .field { width: 100%; border-radius: .5rem; background: #020617; border: 1px solid #334155;
+           padding: .55rem .75rem; color: #e2e8f0; font-size: .875rem; }
+  .field:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+  .field::placeholder { color: #475569; }
+{% endblock %}
+
+{% block content %}
+
+  <div class="mb-8">
+    <h1 class="text-xl font-semibold text-slate-100">Alert channels</h1>
+    <p class="text-sm text-slate-500 mt-1">Where to send UP/DOWN alerts. Changes apply immediately — no restart needed.</p>
+  </div>
+
+  <div class="grid gap-6 lg:grid-cols-5 items-start">
+
+    <form id="channel-form" class="lg:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 grid gap-4" novalidate>
+      <label class="grid gap-1.5 text-sm text-slate-300">Type
+        <select name="type" class="field">
+          <option value="telegram">Telegram</option>
+          <option value="bale">Bale</option>
+        </select>
+      </label>
+      <label class="grid gap-1.5 text-sm text-slate-300">Name
+        <input name="name" required class="field" placeholder="e.g. Ops Telegram">
+        <span class="text-xs text-slate-500">Must be unique.</span>
+      </label>
+      <label class="grid gap-1.5 text-sm text-slate-300">Bot token
+        <input name="bot_token" type="password" required autocomplete="new-password" class="field font-mono" placeholder="123456:ABC-DEF…">
+        <span class="text-xs text-slate-500">Stored encrypted. Never shown again.</span>
+      </label>
+      <label class="grid gap-1.5 text-sm text-slate-300">Chat IDs
+        <input name="chat_ids" required class="field font-mono" placeholder="123456789, -1001234567890">
+        <span class="text-xs text-slate-500">Comma-separated. The bot must already be able to message these chats.</span>
+      </label>
+      <div class="grid gap-4 border-t border-slate-800 pt-5">
+        <div><button type="submit" id="add-btn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 text-sm font-medium disabled:opacity-50">Add channel</button></div>
+        <div id="result" hidden class="rounded-xl border border-red-900/60 bg-red-950/40 text-red-300 px-4 py-3 text-sm whitespace-pre-wrap"></div>
+      </div>
+    </form>
+
+    <aside class="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">Added from the UI</p>
+        <span class="text-xs text-slate-500">{{ channels | length }}</span>
+      </div>
+      {% if channels %}
+      <ul class="divide-y divide-slate-800/70">
+        {% for c in channels %}
+        <li class="px-5 py-3 flex items-center gap-3">
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold text-slate-100 text-sm truncate">{{ c.name }}</p>
+            <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ c.chat_ids | join(", ") }}</p>
+          </div>
+          <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">{{ c.type }}</span>
+          <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
+                  data-name="{{ c.name }}">Delete</button>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="px-5 py-8 text-sm text-slate-500 text-center">Nothing added yet.</p>
+      {% endif %}
+      <p class="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Channels defined in config.yaml are managed in that file and aren't listed here.</p>
+    </aside>
+
+  </div>
+
+  <script>
+    const form = document.getElementById('channel-form');
+    const resultEl = document.getElementById('result');
+    const addBtn = document.getElementById('add-btn');
+
+    async function errorText(resp) {
+      const body = await resp.json();
+      if (typeof body.detail === 'string') return body.detail;
+      return body.detail.map(e => e.loc.slice(-1)[0] + ': ' + e.msg).join('\n');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!form.reportValidity()) return;
+      const data = Object.fromEntries(new FormData(form));
+      data.chat_ids = data.chat_ids.split(',').map(s => s.trim()).filter(Boolean);
+      addBtn.disabled = true;
+      const resp = await fetch('/api/channels', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+      });
+      if (resp.ok) return location.reload();
+      resultEl.textContent = await errorText(resp);
+      resultEl.hidden = false;
+      addBtn.disabled = false;
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Delete channel "${btn.dataset.name}"?`)) return;
+        btn.disabled = true;
+        const resp = await fetch('/api/channels/' + encodeURIComponent(btn.dataset.name), {method: 'DELETE'});
+        if (resp.ok) return location.reload();
+        btn.disabled = false;
+        alert(await errorText(resp));
+      });
+    });
+  </script>
+
+{% endblock %}

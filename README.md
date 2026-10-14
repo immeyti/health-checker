@@ -127,6 +127,10 @@ DASHBOARD_PASSWORD=your_dashboard_password
 
 `${VAR_NAME}` in `config.yaml` is automatically interpolated from the environment at startup.
 
+### Managing alert channels from the web UI
+
+Open `/channels` to add Telegram or Bale channels (bot token + chat IDs). Tokens are stored encrypted with `MONITOR_SECRET_KEY` and apply immediately. SMS channels are still configured in `config.yaml`.
+
 ### Managing targets from the web UI
 
 Open `/targets` to add an HTTP, ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
@@ -159,6 +163,27 @@ All endpoints require HTTP Basic Auth with the same credentials as the web UI.
 | `monitor_screenshots` | Screenshots (reserved for future use) |
 
 Config and `.env` are bind-mounted from the host so you can edit them without rebuilding the image.
+
+---
+
+## Production deployment
+
+Every push to `main` runs `.github/workflows/deploy.yml`: tests → build image and push to GHCR (`:<sha>` and `:latest`) → SSH to the server and `docker compose up`. The app listens on `127.0.0.1:8000` only; Caddy terminates TLS on port 443 using a Cloudflare Origin Certificate, and `health.chmod750.org` is a proxied (orange-cloud) DNS record with SSL mode *Full (strict)*. The Lightsail firewall allows 443 only from Cloudflare IP ranges.
+
+**GitHub secrets**
+
+| Secret | Contents |
+|---|---|
+| `SSH_HOST`, `SSH_USER` | Server address and login user |
+| `SSH_PRIVATE_KEY` | Dedicated ed25519 deploy key |
+| `SSH_KNOWN_HOSTS` | Pinned host key line for the server |
+| `ENV_FILE` | Full `.env` contents |
+| `CONFIG_YAML` | Production `config/config.yaml` |
+| `ORIGIN_CERT`, `ORIGIN_KEY` | Cloudflare Origin Certificate and private key for `health.chmod750.org` |
+
+Change config or secrets: update the secret, then re-run the workflow (*Actions → Run workflow*).
+Roll back: re-run the workflow on an older commit; images are tagged by SHA.
+The first deploy installs Docker and a 1 GB swap file on the server.
 
 ---
 

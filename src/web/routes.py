@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..config import target_host
 from ..daemon import MonitoringDaemon
-from ..models import TargetIn
+from ..models import ChannelIn, TargetIn
 from ..state import StateTracker
 
 
@@ -113,5 +113,33 @@ def build_router(
             )
         await daemon.remove_target(target_name)
         host_map.pop(target_name, None)
+
+    # ------------------------------------------------------------------
+    # Alert channels managed from the web UI
+    # ------------------------------------------------------------------
+
+    @router.get("/channels", response_class=HTMLResponse)
+    async def channels_page(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="channels.html",
+            context={"channels": state.get_channels()},
+        )
+
+    @router.post("/api/channels", status_code=201)
+    async def add_channel(body: ChannelIn):
+        if daemon.has_channel(body.name):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Channel '{body.name}' already exists")
+        daemon.add_channel(body.name, body.to_channel_config())
+        state.add_channel(body.name, body.type, body.bot_token, body.chat_ids)
+        return {"name": body.name}
+
+    @router.delete("/api/channels/{name}", status_code=204)
+    async def delete_channel(name: str):
+        if not state.delete_channel(name):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Channel not found or defined in config.yaml"
+            )
+        daemon.remove_channel(name)
 
     return router

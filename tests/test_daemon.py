@@ -87,6 +87,7 @@ def _make_daemon(
     daemon._state = state
     daemon._checkers = checkers
     daemon._channels = channels
+    daemon._ui_channels = {}
     daemon._running = False
     return daemon
 
@@ -206,3 +207,21 @@ async def test_check_once_does_not_record(minimal_config, state):
     assert result.status == "DOWN"
     assert result.error_message == "Connection refused"
     assert state.get_status("tcp-test") is None
+
+
+async def test_ui_channel_receives_alert(state: StateTracker) -> None:
+    checker = FixedResultChecker([make_result(status="UP"), make_result(status="DOWN")])
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [], state)
+    daemon._ui_channels["ops"] = channel
+
+    await daemon._run_cycle()
+    await daemon._run_cycle()
+
+    assert len(channel.sent_alerts) == 1
+
+
+def test_daemon_loads_db_channels_at_startup(minimal_config, state):
+    state.add_channel("ops", "telegram", "123:TOKEN", ["42"])
+    daemon = MonitoringDaemon(config=minimal_config, state=state)
+    assert daemon.has_channel("ops")

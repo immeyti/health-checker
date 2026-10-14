@@ -1,0 +1,41 @@
+services:
+  monitor:
+    image: ghcr.io/immeyti/health-checker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW   # ICMP ping
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config/config.yaml:ro
+      - monitor_data:/app/data
+      - monitor_videos:/app/videos
+      - monitor_screenshots:/app/screenshots
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./origin.pem:/certs/origin.pem:ro
+      - ./origin.key:/certs/origin.key:ro
+    depends_on:
+      - monitor
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  monitor_data:
+  monitor_videos:
+  monitor_screenshots:
