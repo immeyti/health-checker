@@ -129,7 +129,7 @@ DASHBOARD_PASSWORD=your_dashboard_password
 
 ### Managing alert channels from the web UI
 
-Open `/channels` to add Telegram or Bale channels (bot token + chat IDs). Tokens are stored encrypted with `MONITOR_SECRET_KEY` and apply immediately. SMS channels are still configured in `config.yaml`.
+Open `/channels` to add Telegram or Bale channels (bot token + chat IDs, plus an optional Telegram topic ID to post into a specific topic of a group with topics). Tokens are stored encrypted with `MONITOR_SECRET_KEY` and apply immediately. SMS channels are still configured in `config.yaml`.
 
 ### Managing targets from the web UI
 

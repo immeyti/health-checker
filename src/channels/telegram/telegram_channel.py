@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import httpx
 
@@ -13,9 +14,10 @@ _SEND_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 
 class TelegramChannel(BaseChannel):
-    def __init__(self, bot_token: str, chat_ids: list[str]) -> None:
+    def __init__(self, bot_token: str, chat_ids: list[str], topic_id: Optional[int] = None) -> None:
         self._bot_token = bot_token
         self._chat_ids = chat_ids
+        self._topic_id = topic_id  # forum topic (message_thread_id); None = General
 
     async def send(self, alert: Alert) -> None:
         message = self._format_message(alert)
@@ -23,7 +25,10 @@ class TelegramChannel(BaseChannel):
         async with httpx.AsyncClient(timeout=10) as client:
             for chat_id in self._chat_ids:
                 try:
-                    resp = await client.post(url, json={"chat_id": chat_id, "text": message})
+                    payload = {"chat_id": chat_id, "text": message}
+                    if self._topic_id is not None:
+                        payload["message_thread_id"] = self._topic_id
+                    resp = await client.post(url, json=payload)
                     if resp.status_code != 200:
                         logger.error(
                             "Telegram message to %s failed: HTTP %d — %s",
@@ -49,4 +54,5 @@ class TelegramChannel(BaseChannel):
         return cls(
             bot_token=telegram["bot_token"],
             chat_ids=config.get("chat_ids", []),
+            topic_id=telegram.get("topic_id"),
         )

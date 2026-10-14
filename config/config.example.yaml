@@ -57,6 +57,7 @@ alerts:
     #     - "123456789"
     #   telegram:
     #     bot_token: "${TELEGRAM_BOT_TOKEN}"
+    #     topic_id: 586   # optional — forum topic to post into (default: General)
 
 web:
   host: "0.0.0.0"

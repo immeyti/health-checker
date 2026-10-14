@@ -198,7 +198,7 @@ pytest -k "transition"
 | `tests/test_ping.py` | PingChecker — real subprocess ping (1 fast + 1 slow) |
 | `tests/test_http.py` | HTTPChecker — status codes, redirects, timeout, body text (respx) (8 cases) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
-| `tests/test_channels.py` | SMSChannel, TelegramChannel + build_channel (6 cases) |
+| `tests/test_channels.py` | SMSChannel, TelegramChannel (incl. forum topic) + build_channel (7 cases) |
 | `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once (7 cases) |
 | `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (24 cases) |
 

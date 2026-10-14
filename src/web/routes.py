@@ -131,7 +131,7 @@ def build_router(
         if daemon.has_channel(body.name):
             raise HTTPException(status.HTTP_409_CONFLICT, f"Channel '{body.name}' already exists")
         daemon.add_channel(body.name, body.to_channel_config())
-        state.add_channel(body.name, body.type, body.bot_token, body.chat_ids)
+        state.add_channel(body.name, body.type, body.bot_token, body.chat_ids, body.topic_id)
         return {"name": body.name}
 
     @router.delete("/api/channels/{name}", status_code=204)

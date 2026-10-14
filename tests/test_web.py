@@ -7,6 +7,7 @@ import socket
 import pytest
 from fastapi.testclient import TestClient
 
+from src.daemon import MonitoringDaemon
 from tests.conftest import TEST_PASSWORD, TEST_USERNAME, make_result
 
 
@@ -248,3 +249,11 @@ def test_channel_token_is_encrypted_at_rest(web_client: TestClient, seeded_state
 @pytest.mark.parametrize("method,path", [("get", "/channels"), ("post", "/api/channels"), ("delete", "/api/channels/x")])
 def test_channel_routes_require_auth(unauthenticated_client: TestClient, method: str, path: str) -> None:
     assert getattr(unauthenticated_client, method)(path).status_code == 401
+
+
+def test_add_channel_with_topic(web_client: TestClient, daemon, seeded_state) -> None:
+    web_client.post("/api/channels", json={**CHANNEL_BODY, "topic_id": 586})
+    assert seeded_state.get_channels()[0]["topic_id"] == 586
+    assert "topic 586" in web_client.get("/channels").text
+    reloaded = MonitoringDaemon(config=daemon._config, state=seeded_state)
+    assert reloaded._ui_channels["ops"]._topic_id == 586

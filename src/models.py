@@ -133,10 +133,11 @@ class ChannelIn(BaseModel):
     name: str = Field(min_length=1)
     bot_token: str = Field(min_length=1)
     chat_ids: list[str] = Field(min_length=1)
+    topic_id: Optional[int] = None  # Telegram forum topic; ignored by Bale
 
     def to_channel_config(self) -> dict:
         return {
             "type": self.type,
             "chat_ids": self.chat_ids,
-            self.type: {"bot_token": self.bot_token},
+            self.type: {"bot_token": self.bot_token, "topic_id": self.topic_id},
         }

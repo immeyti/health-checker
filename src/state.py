@@ -297,8 +297,10 @@ class StateTracker:
     # Alert channels managed from the web UI
     # ------------------------------------------------------------------
 
-    def add_channel(self, name: str, channel_type: str, bot_token: str, chat_ids: list[str]) -> None:
-        cfg = {"bot_token": encrypt(bot_token), "chat_ids": chat_ids}
+    def add_channel(
+        self, name: str, channel_type: str, bot_token: str, chat_ids: list[str], topic_id: Optional[int] = None
+    ) -> None:
+        cfg = {"bot_token": encrypt(bot_token), "chat_ids": chat_ids, "topic_id": topic_id}
         with self._conn:
             self._conn.execute(
                 "INSERT INTO alert_channels (name, channel_type, config, created_at) VALUES (?, ?, ?, ?)",
@@ -306,7 +308,7 @@ class StateTracker:
             )
 
     def get_channels(self) -> list[dict]:
-        """UI-added channels as {name, type, bot_token, chat_ids} with the token decrypted."""
+        """UI-added channels as {name, type, bot_token, chat_ids, topic_id} with the token decrypted."""
         rows = self._conn.execute(
             "SELECT name, channel_type, config FROM alert_channels ORDER BY name"
         ).fetchall()
@@ -318,6 +320,7 @@ class StateTracker:
                 "type": r["channel_type"],
                 "bot_token": decrypt(cfg["bot_token"]),
                 "chat_ids": cfg["chat_ids"],
+                "topic_id": cfg.get("topic_id"),  # absent in rows saved before topics existed
             })
         return channels
 

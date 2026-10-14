@@ -88,3 +88,18 @@ async def test_telegram_channel_sends_to_all_chat_ids():
     payloads = [json.loads(call.request.content) for call in route.calls]
     assert [p["chat_id"] for p in payloads] == ["111", "222"]
     assert "MyServer" in payloads[0]["text"]
+    assert "message_thread_id" not in payloads[0]
+
+
+@respx.mock
+async def test_telegram_channel_sends_to_topic():
+    route = respx.post("https://api.telegram.org/botfake-token/sendMessage").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    channel = build_channel(
+        {"type": "telegram", "chat_ids": ["-100123"], "telegram": {"bot_token": "fake-token", "topic_id": 586}}
+    )
+    await channel.send(_make_alert())
+    payload = json.loads(route.calls[0].request.content)
+    assert payload["chat_id"] == "-100123"
+    assert payload["message_thread_id"] == 586

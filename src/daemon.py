@@ -159,7 +159,11 @@ class MonitoringDaemon:
     def _build_ui_channels(self) -> dict[str, BaseChannel]:
         channels: dict[str, BaseChannel] = {}
         for c in self._state.get_channels():
-            cfg = {"type": c["type"], "chat_ids": c["chat_ids"], c["type"]: {"bot_token": c["bot_token"]}}
+            cfg = {
+                "type": c["type"],
+                "chat_ids": c["chat_ids"],
+                c["type"]: {"bot_token": c["bot_token"], "topic_id": c["topic_id"]},
+            }
             try:
                 channels[c["name"]] = build_channel(cfg)
             except Exception as exc:

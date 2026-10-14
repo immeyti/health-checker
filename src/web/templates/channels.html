@@ -40,6 +40,10 @@
         <input name="chat_ids" required class="field font-mono" placeholder="123456789, -1001234567890">
         <span class="text-xs text-slate-500">Comma-separated. The bot must already be able to message these chats.</span>
       </label>
+      <label class="grid gap-1.5 text-sm text-slate-300"><span>Topic ID <span class="text-xs text-slate-500">(optional, Telegram only)</span></span>
+        <input name="topic_id" type="number" class="field font-mono" placeholder="586">
+        <span class="text-xs text-slate-500">For groups with topics: send alerts to this topic instead of General. It's the last number in a topic link (t.me/c/…/586).</span>
+      </label>
       <div class="grid gap-4 border-t border-slate-800 pt-5">
         <div><button type="submit" id="add-btn" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 text-sm font-medium disabled:opacity-50">Add channel</button></div>
         <div id="result" hidden class="rounded-xl border border-red-900/60 bg-red-950/40 text-red-300 px-4 py-3 text-sm whitespace-pre-wrap"></div>
@@ -57,7 +61,7 @@
         <li class="px-5 py-3 flex items-center gap-3">
           <div class="min-w-0 flex-1">
             <p class="font-semibold text-slate-100 text-sm truncate">{{ c.name }}</p>
-            <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ c.chat_ids | join(", ") }}</p>
+            <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ c.chat_ids | join(", ") }}{% if c.topic_id %} · topic {{ c.topic_id }}{% endif %}</p>
           </div>
           <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">{{ c.type }}</span>
           <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
@@ -89,6 +93,7 @@
       if (!form.reportValidity()) return;
       const data = Object.fromEntries(new FormData(form));
       data.chat_ids = data.chat_ids.split(',').map(s => s.trim()).filter(Boolean);
+      if (data.topic_id === '') delete data.topic_id;
       addBtn.disabled = true;
       const resp = await fetch('/api/channels', {
         method: 'POST',
