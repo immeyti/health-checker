@@ -1,0 +1,4 @@
+health.chmod750.org {
+	tls /certs/origin.pem /certs/origin.key
+	reverse_proxy monitor:8000
+}

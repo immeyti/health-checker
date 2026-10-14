@@ -168,7 +168,7 @@ Config and `.env` are bind-mounted from the host so you can edit them without re
 
 ## Production deployment
 
-Every push to `main` runs `.github/workflows/deploy.yml`: tests → build image and push to GHCR (`:<sha>` and `:latest`) → SSH to the server and `docker compose up`. The web UI is exposed only through a Cloudflare Tunnel (the app listens on `127.0.0.1:8000`).
+Every push to `main` runs `.github/workflows/deploy.yml`: tests → build image and push to GHCR (`:<sha>` and `:latest`) → SSH to the server and `docker compose up`. The app listens on `127.0.0.1:8000` only; Caddy terminates TLS on port 443 using a Cloudflare Origin Certificate, and `health.chmod750.org` is a proxied (orange-cloud) DNS record with SSL mode *Full (strict)*. The Lightsail firewall allows 443 only from Cloudflare IP ranges.
 
 **GitHub secrets**
 
@@ -179,7 +179,7 @@ Every push to `main` runs `.github/workflows/deploy.yml`: tests → build image 
 | `SSH_KNOWN_HOSTS` | Pinned host key line for the server |
 | `ENV_FILE` | Full `.env` contents |
 | `CONFIG_YAML` | Production `config/config.yaml` |
-| `TUNNEL_TOKEN` | Cloudflare Tunnel token (public hostname → `http://monitor:8000`) |
+| `ORIGIN_CERT`, `ORIGIN_KEY` | Cloudflare Origin Certificate and private key for `health.chmod750.org` |
 
 Change config or secrets: update the secret, then re-run the workflow (*Actions → Run workflow*).
 Roll back: re-run the workflow on an older commit; images are tagged by SHA.

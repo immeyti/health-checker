@@ -70,7 +70,8 @@ jobs:
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
           CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
-          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+          ORIGIN_CERT: ${{ secrets.ORIGIN_CERT }}
+          ORIGIN_KEY: ${{ secrets.ORIGIN_KEY }}
         run: |
           umask 077
           mkdir -p out
@@ -78,7 +79,9 @@ jobs:
           cp deploy/remote-deploy.sh out/deploy.sh
           printf '%s\n' "$ENV_FILE" > out/.env
           printf '%s\n' "$CONFIG_YAML" > out/config.yaml
-          printf 'TUNNEL_TOKEN=%s\n' "$TUNNEL_TOKEN" > out/tunnel.env
+          cp deploy/Caddyfile out/Caddyfile
+          printf '%s\n' "$ORIGIN_CERT" > out/origin.pem
+          printf '%s\n' "$ORIGIN_KEY" > out/origin.key
           printf 'IMAGE_TAG=%s\n' "$GITHUB_SHA" > out/image.env
 
       - name: Upload and deploy
