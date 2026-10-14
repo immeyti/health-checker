@@ -1,0 +1,94 @@
+name: Test, build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iputils-ping
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      - run: pytest -m "not slow"
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Render runtime files
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+        run: |
+          umask 077
+          mkdir -p out
+          cp deploy/docker-compose.prod.yml out/docker-compose.yml
+          cp deploy/remote-deploy.sh out/deploy.sh
+          printf '%s\n' "$ENV_FILE" > out/.env
+          printf '%s\n' "$CONFIG_YAML" > out/config.yaml
+          printf 'TUNNEL_TOKEN=%s\n' "$TUNNEL_TOKEN" > out/tunnel.env
+          printf 'IMAGE_TAG=%s\n' "$GITHUB_SHA" > out/image.env
+
+      - name: Upload and deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          GHCR_USER: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/id_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes $SSH_USER@$SSH_HOST"
+          $SSH 'umask 077 && mkdir -p ~/health-checker'
+          tar -C out -cf - . | $SSH 'tar -C ~/health-checker -xf - && chmod 700 ~/health-checker/deploy.sh'
+          printf '%s' "$GITHUB_TOKEN" | $SSH "GHCR_USER='$GHCR_USER' bash ~/health-checker/deploy.sh"

@@ -162,6 +162,27 @@ Config and `.env` are bind-mounted from the host so you can edit them without re
 
 ---
 
+## Production deployment
+
+Every push to `main` runs `.github/workflows/deploy.yml`: tests → build image and push to GHCR (`:<sha>` and `:latest`) → SSH to the server and `docker compose up`. The web UI is exposed only through a Cloudflare Tunnel (the app listens on `127.0.0.1:8000`).
+
+**GitHub secrets**
+
+| Secret | Contents |
+|---|---|
+| `SSH_HOST`, `SSH_USER` | Server address and login user |
+| `SSH_PRIVATE_KEY` | Dedicated ed25519 deploy key |
+| `SSH_KNOWN_HOSTS` | Pinned host key line for the server |
+| `ENV_FILE` | Full `.env` contents |
+| `CONFIG_YAML` | Production `config/config.yaml` |
+| `TUNNEL_TOKEN` | Cloudflare Tunnel token (public hostname → `http://monitor:8000`) |
+
+Change config or secrets: update the secret, then re-run the workflow (*Actions → Run workflow*).
+Roll back: re-run the workflow on an older commit; images are tagged by SHA.
+The first deploy installs Docker and a 1 GB swap file on the server.
+
+---
+
 ## Project structure
 
 ```
