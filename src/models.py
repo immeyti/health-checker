@@ -16,6 +16,7 @@ class CheckResult(BaseModel):
     checked_at: datetime
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
+    diagnostics: dict[str, str | int | float | None] = Field(default_factory=dict)
 
 
 class TargetStatus(BaseModel):

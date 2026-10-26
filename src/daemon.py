@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
+from uuid import uuid4
 
 from .channels import BaseChannel, build_channel
 from .checkers.base import BaseChecker
@@ -12,6 +14,7 @@ from .checkers.http import HTTPChecker
 from .checkers.ping import PingChecker
 from .checkers.tcp import TCPChecker
 from .config import AppConfig, DashboardTarget, HttpTarget, Target, TcpTarget
+from .connectivity import ConnectivityProbe, PublicIPLookup
 from .models import Alert, CheckResult
 from .state import StateTracker
 
@@ -28,6 +31,9 @@ class MonitoringDaemon:
         self._checkers: list[BaseChecker] = self._build_checkers()
         self._channels: list[BaseChannel] = self._build_channels()
         self._ui_channels: dict[str, BaseChannel] = self._build_ui_channels()
+        self._connectivity = ConnectivityProbe(config.connectivity_hosts)
+        self._public_ip = PublicIPLookup(config.public_ip_url)
+        self._network_down = False
         self._running = False
 
     # ------------------------------------------------------------------
@@ -50,6 +56,10 @@ class MonitoringDaemon:
                 await asyncio.sleep(sleep_for)
         finally:
             await self._shutdown()
+
+    @property
+    def public_ip(self) -> Optional[str]:
+        return self._public_ip.value
 
     def stop(self) -> None:
         self._running = False
@@ -94,12 +104,57 @@ class MonitoringDaemon:
         logger.debug("Starting check cycle for %d targets", len(self._checkers))
         self._state.purge_old_logs(self._config.storage.retention_days)
 
-        tasks = [self._check_target(checker) for checker in self._checkers]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await self._public_ip.refresh()
+        checkers = list(self._checkers)
+        outcomes = await asyncio.gather(*(self._check_target(c) for c in checkers))
+        # Skip failed checks and targets deleted while their check was running
+        outcomes = [o for c, o in zip(checkers, outcomes) if o and c in self._checkers]
+        finished = [result for _, result in outcomes]
 
-    async def _check_target(self, checker: BaseChecker) -> None:
+        down_cycles = [cycle_id for cycle_id, result in outcomes if result.status == "DOWN"]
+        reason = issue = None
+        if len(finished) >= 2 and len(down_cycles) == len(finished):
+            reason = f"All {len(finished)} targets failed at the same time."
+            issue = "all_targets_failed"
+        elif down_cycles and not await self._connectivity.is_online():
+            reason = "Reference hosts are unreachable from the monitor."
+            issue = "monitor_offline"
+
+        if reason:
+            # The monitor's own connection is the likely cause: don't record
+            # DOWN or alert per target; send one network alert instead.
+            logger.warning("Monitor network problem — %s Site DOWN results not recorded.", reason)
+            self._state.mark_network_issue(down_cycles, issue)
+            finished = [r for r in finished if r.status == "UP"]
+            if not self._network_down:
+                self._network_down = True
+                await self._dispatch_alert(self._network_alert("UP_TO_DOWN", reason))
+        elif self._network_down:
+            self._network_down = False
+            logger.info("Monitor network restored")
+            await self._dispatch_alert(self._network_alert(
+                "DOWN_TO_UP", "Site checks are running normally again."))
+
+        for result in finished:
+            alert: Optional[Alert] = self._state.update(result)
+            if alert:
+                await self._dispatch_alert(alert)
+
+    @staticmethod
+    def _network_alert(transition: str, message: str) -> Alert:
+        return Alert(
+            target_name="Monitor network",
+            target_type="network",
+            transition=transition,
+            triggered_at=datetime.now(timezone.utc),
+            message=message,
+        )
+
+    async def _check_target(self, checker: BaseChecker) -> Optional[tuple[str, CheckResult]]:
+        """Check one target, retrying a DOWN result; (cycle_id, final result), or None if it crashed."""
         try:
-            result = await self._run_check(checker)
+            cycle_id = uuid4().hex
+            result = await self._check_and_record(checker, cycle_id, 1)
             retries = (
                 self._config.dashboard_retries
                 if checker.target_type == "dashboard"
@@ -113,18 +168,32 @@ class MonitoringDaemon:
                     attempt, retries, checker.name, result.error_message,
                 )
                 await asyncio.sleep(self._config.retry_delay)
-                result = await self._run_check(checker)
-
-            if checker not in self._checkers:
-                return  # target was deleted while this check was running
-
-            alert: Optional[Alert] = self._state.update(result)
-            if alert:
-                await self._dispatch_alert(alert)
+                result = await self._check_and_record(checker, cycle_id, attempt + 1)
+            return cycle_id, result
         except Exception as exc:
             logger.error(
                 "Unexpected error checking %s: %s", checker.name, exc, exc_info=True
             )
+            return None
+
+    async def _check_and_record(self, checker: BaseChecker, cycle_id: str,
+                                attempt_number: int) -> CheckResult:
+        try:
+            result = await self._run_check(checker)
+        except Exception as exc:
+            logger.exception("Check attempt failed unexpectedly for %s", checker.name)
+            result = CheckResult(
+                target_name=checker.name,
+                target_type=checker.target_type,
+                status="DOWN",
+                checked_at=datetime.now(timezone.utc),
+                error_message=f"{type(exc).__name__}: {str(exc)[:200]}",
+                diagnostics={"exception_type": type(exc).__name__},
+            )
+        if self._public_ip.value:
+            result.diagnostics["source_ip"] = self._public_ip.value
+        self._state.record_attempt(result, cycle_id, attempt_number)
+        return result
 
     async def _run_check(self, checker: BaseChecker) -> CheckResult:
         if checker.target_type == "dashboard":

@@ -93,6 +93,8 @@
             {% if host_map.get(s.name) %}
               <p class="text-xs text-slate-500 mt-0.5 font-mono truncate max-w-[200px]">{{ host_map.get(s.name) }}</p>
             {% endif %}
+            <a class="text-xs text-emerald-400 hover:underline focus-visible:outline-2 focus-visible:outline-emerald-400"
+               href="/history/{{ s.name | urlencode }}">View check log →</a>
           </td>
 
           {# Type chip #}

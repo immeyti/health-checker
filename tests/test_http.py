@@ -9,8 +9,15 @@ from src.config import HttpTarget
 URL = "https://site.example.com/"
 
 
+class FixedDNSChecker(HTTPChecker):
+    """Answers DNS lookups for failed checks without touching the network."""
+
+    async def _resolve(self, host):
+        return "203.0.113.7"
+
+
 def _checker(**kwargs) -> HTTPChecker:
-    return HTTPChecker(HttpTarget(name="site", url=URL, **kwargs))
+    return FixedDNSChecker(HttpTarget(name="site", url=URL, **kwargs))
 
 
 @respx.mock
@@ -29,6 +36,9 @@ async def test_http_500_returns_down_with_status():
     result = await _checker().check()
     assert result.status == "DOWN"
     assert result.error_message == "HTTP 500 Internal Server Error"
+    assert result.diagnostics["http_status"] == 500
+    assert result.diagnostics["request_host"] == "site.example.com"
+    assert result.diagnostics["duration_ms"] >= 0
 
 
 @respx.mock
@@ -54,6 +64,8 @@ async def test_http_timeout_returns_down():
     assert result.status == "DOWN"
     assert result.error_message == "Request timed out after 2000ms"
     assert result.latency_ms is None
+    assert result.diagnostics["exception_type"] == "ConnectTimeout"
+    assert result.diagnostics["resolved_ips"] == "203.0.113.7"
 
 
 @respx.mock

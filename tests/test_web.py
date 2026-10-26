@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import socket
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -61,6 +62,53 @@ def test_api_history_empty(web_client: TestClient) -> None:
     assert response.json() == []
 
 
+def test_attempt_csv_includes_failed_retry(web_client: TestClient, seeded_state) -> None:
+    seeded_state.record_attempt(make_result(status="DOWN", error_message="HTTP 503"), "cycle-1", 1)
+    seeded_state.record_attempt(make_result(status="UP"), "cycle-1", 2)
+    response = web_client.get("/api/attempts/host-a.csv")
+    assert response.status_code == 200
+    assert "text/csv" in response.headers["content-type"]
+    assert "HTTP 503" in response.text
+    assert "cycle-1" in response.text
+    assert ",2,host-a,ping,UP," in response.text
+
+
+def test_attempt_csv_requires_auth(unauthenticated_client: TestClient) -> None:
+    assert unauthenticated_client.get("/api/attempts/host-a.csv").status_code == 401
+
+
+def test_history_csv_exports_existing_results(web_client: TestClient) -> None:
+    response = web_client.get("/api/history/host-a.csv")
+    assert response.status_code == 200
+    assert "checked_at_utc,target_name,target_type,final_status" in response.text
+    assert ",host-a,ping,UP," in response.text
+
+
+def test_history_csv_requires_auth(unauthenticated_client: TestClient) -> None:
+    assert unauthenticated_client.get("/api/history/host-a.csv").status_code == 401
+
+
+def test_history_page_shows_outcomes_and_retries(web_client: TestClient, seeded_state) -> None:
+    seeded_state.update(make_result(status="DOWN", error_message="Connection timed out"))
+    seeded_state.update(make_result(status="UP"))
+    seeded_state.record_attempt(make_result(status="DOWN", error_message="ConnectTimeout"), "cycle-1", 1)
+    seeded_state.record_attempt(make_result(status="UP"), "cycle-1", 2)
+    response = web_client.get("/history/host-a")
+    assert response.status_code == 200
+    assert "Recorded outcomes" in response.text
+    assert "Recent DOWN" in response.text
+    assert "Connection timed out" in response.text
+    assert "Recovered on retry" in response.text
+    assert "ConnectTimeout" in response.text
+    assert "/api/attempts/host-a.csv" in response.text
+
+
+def test_history_page_requires_auth_and_handles_missing_target(unauthenticated_client: TestClient,
+                                                              web_client: TestClient) -> None:
+    assert unauthenticated_client.get("/history/host-a").status_code == 401
+    assert web_client.get("/history/ghost").status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Auth boundary tests
 # ---------------------------------------------------------------------------
@@ -79,11 +127,21 @@ def test_wrong_password_returns_401(unauthenticated_client: TestClient) -> None:
     assert response.status_code == 401
 
 
-def test_startup_fails_without_env_vars(seeded_state, daemon, tmp_path) -> None:
+def test_auth_disabled_without_env_vars(seeded_state, daemon, tmp_path, monkeypatch) -> None:
     from src.web.app import create_app
-    os.environ.pop("MONITOR_USERNAME", None)
-    os.environ.pop("MONITOR_PASSWORD", None)
-    with pytest.raises(RuntimeError, match="MONITOR_USERNAME"):
+    monkeypatch.delenv("MONITOR_USERNAME", raising=False)
+    monkeypatch.delenv("MONITOR_PASSWORD", raising=False)
+    app = create_app(state=seeded_state, daemon=daemon, retention_days=30, screenshots_dir=str(tmp_path))
+    client = TestClient(app)
+    assert client.get("/").status_code == 200
+    assert client.get("/api/status").status_code == 200
+
+
+def test_startup_fails_with_only_one_credential(seeded_state, daemon, tmp_path, monkeypatch) -> None:
+    from src.web.app import create_app
+    monkeypatch.setenv("MONITOR_USERNAME", TEST_USERNAME)
+    monkeypatch.delenv("MONITOR_PASSWORD", raising=False)
+    with pytest.raises(RuntimeError, match="MONITOR_PASSWORD"):
         create_app(state=seeded_state, daemon=daemon, retention_days=30, screenshots_dir=str(tmp_path))
 
 
@@ -257,3 +315,36 @@ def test_add_channel_with_topic(web_client: TestClient, daemon, seeded_state) ->
     assert "topic 586" in web_client.get("/channels").text
     reloaded = MonitoringDaemon(config=daemon._config, state=seeded_state)
     assert reloaded._ui_channels["ops"]._topic_id == 586
+
+
+
+def test_attempt_csv_has_ips_network_flag_and_tehran_range(web_client: TestClient, seeded_state) -> None:
+    inside = make_result(status="DOWN", checked_at=datetime(2026, 10, 22, 7, 0, tzinfo=timezone.utc))
+    inside.diagnostics.update(source_ip="198.51.100.4", resolved_ips="203.0.113.7")
+    seeded_state.record_attempt(inside, "in-window", 1)
+    seeded_state.mark_network_issue(["in-window"], "monitor_offline")
+    seeded_state.record_attempt(
+        make_result(checked_at=datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)), "after", 1)
+
+    # 10:00–12:00 Tehran (UTC+3:30) is 06:30–08:30 UTC
+    response = web_client.get("/api/attempts/host-a.csv",
+                              params={"since": "2026-10-22T10:00", "until": "2026-10-22T12:00"})
+    assert response.status_code == 200
+    header, *rows = response.text.strip().splitlines()
+    assert "network_issue" in header and "source_ip" in header and "resolved_ips" in header
+    assert len(rows) == 1
+    assert "in-window" in rows[0] and "monitor_offline" in rows[0]
+    assert "198.51.100.4" in rows[0] and "203.0.113.7" in rows[0]
+    assert "host-a-attempts.csv" in response.headers["content-disposition"]
+
+
+def test_csv_export_rejects_reversed_range(web_client: TestClient) -> None:
+    response = web_client.get("/api/history/host-a.csv",
+                              params={"since": "2026-10-23T00:00", "until": "2026-10-22T00:00"})
+    assert response.status_code == 422
+
+
+def test_history_page_has_range_form(web_client: TestClient) -> None:
+    response = web_client.get("/history/host-a")
+    assert 'type="datetime-local" name="since"' in response.text
+    assert 'formaction="/api/history/host-a.csv"' in response.text

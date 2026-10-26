@@ -45,6 +45,27 @@ CREATE INDEX IF NOT EXISTS idx_check_logs_target_time
 ON check_logs (target_name, checked_at);
 """
 
+_CREATE_ATTEMPTS_TABLE = """
+CREATE TABLE IF NOT EXISTS check_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    target_name TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    latency_ms REAL,
+    error_message TEXT,
+    diagnostics TEXT NOT NULL,
+    network_issue TEXT
+);
+"""
+
+_CREATE_ATTEMPTS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_check_attempts_target_time
+ON check_attempts (target_name, checked_at);
+"""
+
 # Alert channels added from the web UI (bot token Fernet-encrypted)
 _CREATE_CHANNELS_TABLE = """
 CREATE TABLE IF NOT EXISTS alert_channels (
@@ -88,6 +109,8 @@ class StateTracker:
             self._conn.execute(_CREATE_STATES_TABLE)
             self._conn.execute(_CREATE_LOGS_TABLE)
             self._conn.execute(_CREATE_LOGS_INDEX)
+            self._conn.execute(_CREATE_ATTEMPTS_TABLE)
+            self._conn.execute(_CREATE_ATTEMPTS_INDEX)
             self._conn.execute(_CREATE_TARGETS_TABLE)
             self._conn.execute(_CREATE_CHANNELS_TABLE)
         self._migrate_db()
@@ -98,6 +121,7 @@ class StateTracker:
         migrations = [
             ("check_logs", "screenshot_path", "TEXT"),
             ("target_states", "screenshot_path", "TEXT"),
+            ("check_attempts", "network_issue", "TEXT"),
         ]
         for table, column, definition in migrations:
             try:
@@ -110,6 +134,44 @@ class StateTracker:
     # ------------------------------------------------------------------
     # Core update — called after every check
     # ------------------------------------------------------------------
+
+    def record_attempt(self, result: CheckResult, cycle_id: str, attempt_number: int) -> None:
+        """Keep each probe, including failures that recover during retries."""
+        with self._conn:
+            self._conn.execute(
+                """INSERT INTO check_attempts
+                   (cycle_id, attempt_number, target_name, target_type, status,
+                    checked_at, latency_ms, error_message, diagnostics)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cycle_id, attempt_number, result.target_name, result.target_type,
+                 result.status, result.checked_at.isoformat(), result.latency_ms,
+                 result.error_message, json.dumps(result.diagnostics)),
+            )
+
+    def mark_network_issue(self, cycle_ids: list[str], reason: str) -> None:
+        """Flag cycles whose failure was blamed on the monitor's own network."""
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE check_attempts SET network_issue = ? WHERE cycle_id = ?",
+                [(reason, cycle_id) for cycle_id in cycle_ids],
+            )
+
+    def get_attempts(self, target_name: str, limit: Optional[int] = None,
+                     since: Optional[datetime] = None, until: Optional[datetime] = None) -> list[dict]:
+        clauses = ["target_name = ?"]
+        params: list = [target_name]
+        if since is not None:
+            clauses.append("checked_at >= ?")
+            params.append(since.astimezone(timezone.utc).isoformat())
+        if until is not None:
+            clauses.append("checked_at <= ?")
+            params.append(until.astimezone(timezone.utc).isoformat())
+        params.append(-1 if limit is None else limit)  # SQLite: LIMIT -1 means no limit
+        rows = self._conn.execute(
+            f"SELECT * FROM check_attempts WHERE {' AND '.join(clauses)} "
+            "ORDER BY checked_at DESC, id DESC LIMIT ?", params,
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]
 
     def update(self, result: CheckResult) -> Optional[Alert]:
         now_iso = result.checked_at.isoformat()
@@ -228,17 +290,23 @@ class StateTracker:
     def get_history(
         self,
         target_name: str,
-        limit: int = 100,
+        limit: Optional[int] = 100,
         offset: int = 0,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
     ) -> list[CheckLog]:
+        clauses = ["target_name = ?"]
+        params: list = [target_name]
+        if since is not None:
+            clauses.append("checked_at >= ?")
+            params.append(since.astimezone(timezone.utc).isoformat())
+        if until is not None:
+            clauses.append("checked_at <= ?")
+            params.append(until.astimezone(timezone.utc).isoformat())
+        params += [-1 if limit is None else limit, offset]
         rows = self._conn.execute(
-            """
-            SELECT * FROM check_logs
-            WHERE target_name = ?
-            ORDER BY checked_at DESC
-            LIMIT ? OFFSET ?
-            """,
-            (target_name, limit, offset),
+            f"SELECT * FROM check_logs WHERE {' AND '.join(clauses)} "
+            "ORDER BY checked_at DESC LIMIT ? OFFSET ?", params,
         ).fetchall()
         return [
             CheckLog(
@@ -291,6 +359,7 @@ class StateTracker:
             if deleted:
                 self._conn.execute("DELETE FROM target_states WHERE name = ?", (name,))
                 self._conn.execute("DELETE FROM check_logs WHERE target_name = ?", (name,))
+                self._conn.execute("DELETE FROM check_attempts WHERE target_name = ?", (name,))
         return bool(deleted)
 
     # ------------------------------------------------------------------
@@ -341,6 +410,8 @@ class StateTracker:
         cur = self._conn.execute(
             "DELETE FROM check_logs WHERE checked_at < ?", (cutoff,)
         )
+        self._conn.commit()
+        self._conn.execute("DELETE FROM check_attempts WHERE checked_at < ?", (cutoff,))
         self._conn.commit()
         deleted = cur.rowcount
         if deleted:

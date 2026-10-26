@@ -34,9 +34,9 @@ def create_app(
 ) -> FastAPI:
     username = os.environ.get("MONITOR_USERNAME")
     password = os.environ.get("MONITOR_PASSWORD")
-    if not username or not password:
+    if bool(username) != bool(password):
         raise RuntimeError(
-            "MONITOR_USERNAME and MONITOR_PASSWORD must be set in the environment"
+            "Set both MONITOR_USERNAME and MONITOR_PASSWORD, or neither to disable auth"
         )
     if not os.environ.get("MONITOR_SECRET_KEY"):
         raise RuntimeError(

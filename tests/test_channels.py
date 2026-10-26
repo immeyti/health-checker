@@ -51,6 +51,26 @@ async def test_sms_channel_message_contains_target_name():
     assert "MyServer" in message
 
 
+async def test_network_alert_has_its_own_message():
+    provider = RecordingProvider()
+    channel = SMSChannel(provider=provider, recipients=["+98911"])
+    await channel.send(_make_alert(target_name="Monitor network", target_type="network",
+                                   message="All 3 targets failed at the same time."))
+    await channel.send(_make_alert(target_name="Monitor network", target_type="network",
+                                   transition="DOWN_TO_UP", message="Back to normal."))
+    down, up = (message for _, message in provider.calls)
+    assert down.startswith("⚠️ Monitor network problem")
+    assert "All 3 targets failed" in down
+    assert up.startswith("✅ Monitor network restored")
+
+
+async def test_alert_time_is_shown_in_tehran():
+    provider = RecordingProvider()
+    channel = SMSChannel(provider=provider, recipients=["+98911"])
+    await channel.send(_make_alert(triggered_at=datetime(2026, 10, 26, 7, 7, tzinfo=timezone.utc)))
+    assert "Time: 2026-10-26 10:37 Tehran" in provider.calls[0][1]
+
+
 def test_build_channel_sms_returns_sms_channel():
     config = {
         "type": "sms",

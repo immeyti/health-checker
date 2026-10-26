@@ -86,6 +86,9 @@ class AlertsConfig:
     channels: list[ChannelConfig] = field(default_factory=list)
 
 
+DEFAULT_CONNECTIVITY_HOSTS = ("1.1.1.1:443", "8.8.8.8:443")
+
+
 @dataclass
 class AppConfig:
     check_interval: int
@@ -100,6 +103,10 @@ class AppConfig:
     retries: int = 2
     dashboard_retries: int = 1  # dashboard checks are slow (browser login)
     retry_delay: int = 10  # seconds between attempts
+    # Reference "host:port" endpoints that tell whether the monitor itself is online
+    connectivity_hosts: list[str] = field(default_factory=lambda: list(DEFAULT_CONNECTIVITY_HOSTS))
+    # Returns the monitor's public IP as plain text; recorded as source_ip ("" disables)
+    public_ip_url: str = "https://api.ipify.org"
 
 
 def _interpolate(value: Any) -> Any:
@@ -199,6 +206,8 @@ def load_config(path: str) -> AppConfig:
         retries=raw.get("retries", 2),
         dashboard_retries=raw.get("dashboard_retries", 1),
         retry_delay=raw.get("retry_delay", 10),
+        connectivity_hosts=raw.get("connectivity_hosts", list(DEFAULT_CONNECTIVITY_HOSTS)),
+        public_ip_url=raw.get("public_ip_url", "https://api.ipify.org"),
         ping_targets=ping_targets,
         tcp_targets=tcp_targets,
         dashboard_targets=dashboard_targets,

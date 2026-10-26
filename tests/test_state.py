@@ -105,6 +105,16 @@ def test_get_history_desc_order(state):
     assert history[0].status == "DOWN"
 
 
+def test_attempts_filter_and_purge(state):
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    now = datetime.now(timezone.utc)
+    state.record_attempt(make_result(checked_at=old, status="DOWN"), "old", 1)
+    state.record_attempt(make_result(checked_at=now), "new", 1)
+    assert [a["cycle_id"] for a in state.get_attempts("host-a", since=now - timedelta(days=1))] == ["new"]
+    state.purge_old_logs(30)
+    assert [a["cycle_id"] for a in state.get_attempts("host-a")] == ["new"]
+
+
 # ---------------------------------------------------------------------------
 # Targets added from the web UI
 # ---------------------------------------------------------------------------
@@ -153,3 +163,23 @@ def test_delete_unknown_target_returns_false(state):
     state.update(make_result(name="yaml-target"))
     assert state.delete_target("yaml-target") is False
     assert state.get_status("yaml-target") is not None
+
+
+def test_history_since_until_without_limit(state):
+    now = datetime.now(timezone.utc)
+    for hours in (50, 30, 10):
+        state.update(make_result(checked_at=now - timedelta(hours=hours)))
+    window = state.get_history("host-a", limit=None, since=now - timedelta(hours=40),
+                               until=now - timedelta(hours=20))
+    assert [log.checked_at for log in window] == [now - timedelta(hours=30)]
+    assert len(state.get_history("host-a", limit=None)) == 3
+
+
+def test_mark_network_issue_flags_whole_cycle(state):
+    state.record_attempt(make_result(status="DOWN"), "c1", 1)
+    state.record_attempt(make_result(status="DOWN"), "c1", 2)
+    state.record_attempt(make_result(status="DOWN"), "c2", 1)
+    state.mark_network_issue(["c1"], "all_targets_failed")
+    assert [a["network_issue"] for a in state.get_attempts("host-a")] == [
+        "all_targets_failed", "all_targets_failed", None,
+    ]

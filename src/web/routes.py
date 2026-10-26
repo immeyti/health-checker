@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
+import re
 import secrets
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -13,13 +19,42 @@ from ..models import ChannelIn, TargetIn
 from ..state import StateTracker
 
 
+_TEHRAN = ZoneInfo("Asia/Tehran")
+
+
+def _export_range(since: datetime | None, until: datetime | None) -> tuple[datetime | None, datetime | None]:
+    """Times without a timezone (e.g. from the log page form) are Tehran time."""
+    since, until = (
+        dt.replace(tzinfo=_TEHRAN) if dt and dt.tzinfo is None else dt
+        for dt in (since, until)
+    )
+    if since and until and since > until:
+        raise HTTPException(422, "since must be before until")
+    return since, until
+
+
+def _csv_response(output: io.StringIO, target_name: str, kind: str) -> Response:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", target_name)
+    return Response(
+        output.getvalue(), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}-{kind}.csv"},
+    )
+
+
+def _csv_safe(value):
+    """Prevent spreadsheet formulas in exported user-controlled text."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def build_router(
     state: StateTracker,
     daemon: MonitoringDaemon,
     templates: Jinja2Templates,
     retention_days: int,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     host_map: dict[str, str],
 ) -> APIRouter:
     _security = HTTPBasic()
@@ -38,7 +73,10 @@ def build_router(
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-    router = APIRouter(dependencies=[Depends(verify_credentials)])
+    # Auth is off when no credentials are configured (e.g. local development)
+    router = APIRouter(
+        dependencies=[Depends(verify_credentials)] if username and password else []
+    )
 
     @router.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
@@ -50,6 +88,66 @@ def build_router(
                 "statuses": statuses,
                 "retention_days": retention_days,
                 "host_map": host_map,
+            },
+        )
+
+    @router.get("/history/{target_name}", response_class=HTMLResponse)
+    async def target_history_page(request: Request, target_name: str):
+        current = state.get_status(target_name, retention_days=retention_days)
+        history = state.get_history(target_name, limit=100)
+        attempts = state.get_attempts(target_name, limit=100)
+        if current is None and not history and not attempts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Target not found")
+
+        groups: dict[str, dict] = {}
+        for attempt in reversed(attempts):
+            cycle_id = attempt["cycle_id"]
+            if cycle_id not in groups:
+                groups[cycle_id] = {
+                    "status": attempt["status"],
+                    "network_issue": attempt["network_issue"],
+                    "attempts": [],
+                }
+            groups[cycle_id]["attempts"].append({
+                **attempt,
+                "checked_at_dt": datetime.fromisoformat(attempt["checked_at"]),
+                "diagnostics": json.loads(attempt["diagnostics"]),
+            })
+        for group in groups.values():
+            group["attempts"].reverse()
+            group["recovered"] = (
+                len(group["attempts"]) > 1
+                and group["attempts"][0]["status"] == "DOWN"
+                and group["status"] == "UP"
+            )
+
+        incidents = []
+        down_start = None
+        for log in reversed(history):
+            if log.status == "DOWN" and down_start is None:
+                down_start = log
+            elif log.status == "UP" and down_start is not None:
+                incidents.append({
+                    "down": down_start,
+                    "up": log,
+                    "gap_seconds": round((log.checked_at - down_start.checked_at).total_seconds()),
+                })
+                down_start = None
+        if down_start is not None:
+            incidents.append({"down": down_start, "up": None, "gap_seconds": None})
+
+        return templates.TemplateResponse(
+            request=request,
+            name="history.html",
+            context={
+                "target_name": target_name,
+                "current": current,
+                "history": history,
+                "groups": list(groups.values())[:30],
+                "incidents": list(reversed(incidents))[:5],
+                "down_count": sum(log.status == "DOWN" for log in history),
+                "host": host_map.get(target_name, ""),
+                "source_ip": daemon.public_ip,
             },
         )
 
@@ -67,12 +165,56 @@ def build_router(
             return JSONResponse({"error": "Target not found"}, status_code=404)
         return JSONResponse(content=status.model_dump(mode="json"))
 
+    @router.get("/api/history/{target_name}.csv")
+    async def export_history(target_name: str, since: datetime | None = None,
+                             until: datetime | None = None):
+        since, until = _export_range(since, until)
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(("checked_at_utc", "target_name", "target_type", "final_status",
+                         "latency_ms", "error_message"))
+        logs = state.get_history(target_name, limit=None, since=since, until=until)
+        for log in reversed(logs):
+            writer.writerow([_csv_safe(value) for value in (
+                log.checked_at.isoformat(), log.target_name, log.target_type,
+                log.status, log.latency_ms, log.error_message,
+            )])
+        return _csv_response(output, target_name, "outcomes")
+
     @router.get("/api/history/{target_name}")
     async def api_history(target_name: str, limit: int = 100, offset: int = 0):
         logs = state.get_history(target_name, limit=limit, offset=offset)
         return JSONResponse(
             content=[l.model_dump(mode="json") for l in logs]
         )
+
+    @router.get("/api/attempts/{target_name}.csv")
+    async def export_attempts(target_name: str, since: datetime | None = None,
+                              until: datetime | None = None):
+        since, until = _export_range(since, until)
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(("checked_at_utc", "cycle_id", "attempt_number", "target_name",
+                         "target_type", "status", "network_issue", "latency_ms",
+                         "error_message", "source_ip", "server_ip", "resolved_ips", "http_status", "duration_ms", "exception_type", "request_host",
+                         "response_host", "redirect_count", "http_version", "date",
+                         "server", "cf_ray", "x_request_id"))
+
+        for row in state.get_attempts(target_name, since=since, until=until):
+            details = json.loads(row["diagnostics"])
+            writer.writerow([_csv_safe(value) for value in (
+                row["checked_at"], row["cycle_id"], row["attempt_number"],
+                row["target_name"], row["target_type"], row["status"],
+                row["network_issue"], row["latency_ms"], row["error_message"],
+                details.get("source_ip"), details.get("server_ip"), details.get("resolved_ips"),
+                details.get("http_status"), details.get("duration_ms"),
+                details.get("exception_type"), details.get("request_host"),
+                details.get("response_host"), details.get("redirect_count"),
+                details.get("http_version"), details.get("date"), details.get("server"),
+                details.get("cf_ray"), details.get("x_request_id"),
+            )])
+        return _csv_response(output, target_name, "attempts")
 
     # ------------------------------------------------------------------
     # Targets managed from the web UI

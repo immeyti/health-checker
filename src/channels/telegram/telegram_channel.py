@@ -6,7 +6,7 @@ from typing import Optional
 import httpx
 
 from ...models import Alert
-from ..base import BaseChannel
+from ..base import BaseChannel, format_alert_time
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +40,14 @@ class TelegramChannel(BaseChannel):
                     logger.error("Failed to send Telegram message to %s: %s", chat_id, exc)
 
     def _format_message(self, alert: Alert) -> str:
+        if alert.target_type == "network":
+            return self._format_network_alert(alert)
         icon = "🔴" if alert.transition == "UP_TO_DOWN" else "🟢"
         return (
             f"{icon} Monitor Alert\n"
             f"Target: {alert.target_name} ({alert.target_type})\n"
             f"Status: {alert.transition.replace('_', ' → ')}\n"
-            f"Time: {alert.triggered_at.strftime('%Y-%m-%d %H:%M UTC')}"
+            f"Time: {format_alert_time(alert.triggered_at)}"
         )
 
     @classmethod

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Monitor — {{ target_name }} log{% endblock %}
+{% block refresh %}{% endblock %}
+{% block refresh_note %}{% endblock %}
+
+{% block content %}
+  <a href="/" class="inline-flex items-center min-h-11 text-sm text-slate-400 hover:text-slate-100 focus-visible:outline-2 focus-visible:outline-emerald-400">← Back to status</a>
+
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mt-3 mb-7">
+    <div class="min-w-0">
+      <p class="text-xs font-semibold uppercase tracking-widest text-emerald-400 mb-2">Check log</p>
+      <h1 class="text-2xl font-semibold text-slate-100 break-words">{{ target_name }}</h1>
+      {% if host %}<p class="text-sm text-slate-400 mt-1 break-all font-mono">{{ host }}</p>{% endif %}
+      <p class="text-xs text-slate-500 mt-2">Times shown in Tehran. CSV files use UTC.{% if source_ip %} Monitor's public IP: <span class="font-mono">{{ source_ip }}</span>{% endif %}</p>
+    </div>
+  </div>
+
+  <form method="get" action="/api/attempts/{{ target_name | urlencode }}.csv"
+        class="rounded-2xl border border-slate-800 bg-slate-900 p-5 mb-8">
+    <h2 class="text-base font-semibold text-slate-100">Download for your hosting provider</h2>
+    <p class="text-xs text-slate-400 mt-1 mb-4">Pick the window in Tehran time; leave a field empty for all retained data. Rows with a <span class="font-mono">network_issue</span> value failed on the monitor's side — leave them out when reporting to the provider.</p>
+    <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <label class="flex flex-col gap-1 text-xs text-slate-400">From
+        <input type="datetime-local" name="since"
+               class="min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 [color-scheme:dark] focus-visible:outline-2 focus-visible:outline-emerald-400">
+      </label>
+      <label class="flex flex-col gap-1 text-xs text-slate-400">To
+        <input type="datetime-local" name="until"
+               class="min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 [color-scheme:dark] focus-visible:outline-2 focus-visible:outline-emerald-400">
+      </label>
+      <button type="submit"
+              class="inline-flex items-center justify-center min-h-11 px-4 rounded-lg bg-emerald-700 text-sm font-medium text-white hover:bg-emerald-600 focus-visible:outline-2 focus-visible:outline-emerald-400">Download attempt CSV</button>
+      <button type="submit" formaction="/api/history/{{ target_name | urlencode }}.csv"
+              class="inline-flex items-center justify-center min-h-11 px-4 rounded-lg border border-slate-600 text-sm text-slate-200 hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-emerald-400">Download outcome CSV</button>
+    </div>
+  </form>
+
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Current status</p>
+      {% if current %}
+        <p class="text-xl font-semibold mt-2 {{ 'text-emerald-400' if current.current_status == 'UP' else 'text-red-400' }}">{{ current.current_status }}</p>
+      {% else %}
+        <p class="text-xl font-semibold text-slate-400 mt-2">Unknown</p>
+      {% endif %}
+    </div>
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Final DOWN results</p>
+      <p class="text-xl font-semibold text-slate-100 mt-2">{{ down_count }} <span class="text-sm font-normal text-slate-400">of last {{ history | length }}</span></p>
+    </div>
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Last checked</p>
+      <p class="text-sm font-medium text-slate-100 mt-3">{% if current %}{{ (current.last_checked | tehran).strftime('%Y-%m-%d %H:%M:%S') }}{% else %}—{% endif %}</p>
+    </div>
+  </div>
+
+  <section aria-labelledby="incidents-title" class="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden mb-6">
+    <div class="px-5 py-4 border-b border-slate-800">
+      <h2 id="incidents-title" class="text-base font-semibold text-slate-100">Recent DOWN → UP changes</h2>
+      <p class="text-xs text-slate-400 mt-1">The gap is between recorded checks; it does not prove how long the site was actually unavailable.</p>
+    </div>
+    {% if incidents %}
+      <ol class="divide-y divide-slate-800/80">
+        {% for incident in incidents %}
+          <li class="px-5 py-4 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 md:items-center">
+            <div>
+              <p class="text-xs font-semibold text-red-300 mb-1">DOWN recorded</p>
+              <time class="text-sm font-mono text-slate-100" datetime="{{ incident.down.checked_at.isoformat() }}">{{ (incident.down.checked_at | tehran).strftime('%Y-%m-%d %H:%M:%S') }}</time>
+              {% if incident.down.error_message %}<p class="text-xs text-red-300 mt-1 break-words">{{ incident.down.error_message }}</p>{% endif %}
+            </div>
+            <div>
+              <p class="text-xs font-semibold text-emerald-300 mb-1">Next UP recorded</p>
+              {% if incident.up %}
+                <time class="text-sm font-mono text-slate-100" datetime="{{ incident.up.checked_at.isoformat() }}">{{ (incident.up.checked_at | tehran).strftime('%Y-%m-%d %H:%M:%S') }}</time>
+              {% else %}
+                <p class="text-sm text-slate-400">Not yet recorded</p>
+              {% endif %}
+            </div>
+            <div class="md:text-right">
+              <p class="text-xs text-slate-400 mb-1">Observed gap</p>
+              <p class="text-sm font-semibold text-slate-100">{% if incident.gap_seconds is not none %}{{ incident.gap_seconds }} s{% else %}Ongoing{% endif %}</p>
+            </div>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="px-5 py-6 text-sm text-slate-400">No DOWN → UP changes in the last 100 recorded outcomes.</p>
+    {% endif %}
+  </section>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+    <section aria-labelledby="outcomes-title" class="min-w-0 rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800">
+        <h2 id="outcomes-title" class="text-base font-semibold text-slate-100">Recorded outcomes</h2>
+        <p class="text-xs text-slate-400 mt-1">The last 100 final check results, including records from before detailed logging.</p>
+      </div>
+      {% if history %}
+        <ol class="divide-y divide-slate-800/80 max-h-[700px] overflow-y-auto">
+          {% for log in history %}
+            <li class="px-5 py-4 {{ 'bg-red-950/20' if log.status == 'DOWN' else '' }}">
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ 'bg-emerald-950 text-emerald-300' if log.status == 'UP' else 'bg-red-950 text-red-300' }}">{{ log.status }}</span>
+                  <time class="text-sm text-slate-200 font-mono" datetime="{{ log.checked_at.isoformat() }}">{{ (log.checked_at | tehran).strftime('%Y-%m-%d %H:%M:%S') }}</time>
+                </div>
+                {% if log.latency_ms is not none %}<span class="text-xs text-slate-400 font-mono">{{ '%.0f' | format(log.latency_ms) }} ms</span>{% endif %}
+              </div>
+              {% if log.error_message %}<p class="mt-2 text-sm text-red-300 break-words">{{ log.error_message }}</p>{% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="px-5 py-8 text-sm text-slate-400">No recorded outcomes yet.</p>
+      {% endif %}
+    </section>
+
+    <section aria-labelledby="attempts-title" class="min-w-0 rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800">
+        <h2 id="attempts-title" class="text-base font-semibold text-slate-100">Individual attempts</h2>
+        <p class="text-xs text-slate-400 mt-1">Open a cycle to see retries and connection details. Available since detailed logging was enabled.</p>
+      </div>
+      {% if groups %}
+        <div class="divide-y divide-slate-800/80 max-h-[700px] overflow-y-auto">
+          {% for group in groups %}
+            <details class="group px-5 py-3" {% if (group.status == 'DOWN' and not group.network_issue) or group.recovered %}open{% endif %}>
+              <summary class="flex items-center justify-between gap-3 min-h-11 cursor-pointer list-none focus-visible:outline-2 focus-visible:outline-emerald-400">
+                <span class="flex flex-wrap items-center gap-2 min-w-0">
+                  <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ 'bg-emerald-950 text-emerald-300' if group.status == 'UP' else 'bg-red-950 text-red-300' }}">{{ group.status }}</span>
+                  <time class="text-sm text-slate-200 font-mono" datetime="{{ group.attempts[0].checked_at }}">{{ (group.attempts[0].checked_at_dt | tehran).strftime('%Y-%m-%d %H:%M:%S') }}</time>
+                  {% if group.recovered %}<span class="text-xs text-amber-300">Recovered on retry</span>{% endif %}
+                  {% if group.network_issue %}<span class="text-xs text-sky-300">Monitor network issue — not counted</span>{% endif %}
+                </span>
+                <span class="text-xs text-slate-400 whitespace-nowrap">{{ group.attempts | length }} {{ 'attempt' if group.attempts | length == 1 else 'attempts' }} ▾</span>
+              </summary>
+              <ol class="mt-2 ml-2 border-l border-slate-700 pl-4 space-y-3 pb-2">
+                {% for attempt in group.attempts %}
+                  {% set d = attempt.diagnostics %}
+                  <li class="text-sm">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span class="font-medium {{ 'text-emerald-300' if attempt.status == 'UP' else 'text-red-300' }}">#{{ attempt.attempt_number }} {{ attempt.status }}</span>
+                      <time class="text-xs text-slate-400 font-mono" datetime="{{ attempt.checked_at }}">{{ (attempt.checked_at_dt | tehran).strftime('%H:%M:%S') }}</time>
+                      {% if d.get('http_status') %}<span class="text-xs text-slate-400 font-mono">HTTP {{ d.get('http_status') }}</span>{% endif %}
+                      {% if d.get('duration_ms') is not none %}<span class="text-xs text-slate-400 font-mono">{{ '%.0f' | format(d.get('duration_ms')) }} ms</span>{% endif %}
+                    </div>
+                    {% if attempt.error_message %}<p class="text-red-300 mt-1 break-words">{{ attempt.error_message }}</p>{% endif %}
+                    {% if d.get('exception_type') or d.get('cf_ray') or d.get('x_request_id') or d.get('response_host') or d.get('server_ip') or d.get('resolved_ips') %}
+                      <p class="text-xs text-slate-400 mt-1 break-all">
+                        {% if d.get('exception_type') %}{{ d.get('exception_type') }}{% endif %}
+                        {% if d.get('response_host') %} · Host: {{ d.get('response_host') }}{% endif %}
+                        {% if d.get('server_ip') %} · Server IP: {{ d.get('server_ip') }}{% elif d.get('resolved_ips') %} · DNS: {{ d.get('resolved_ips') }}{% endif %}
+                        {% if d.get('cf_ray') %} · CF Ray: {{ d.get('cf_ray') }}{% endif %}
+                        {% if d.get('x_request_id') %} · Request ID: {{ d.get('x_request_id') }}{% endif %}
+                      </p>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ol>
+            </details>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="px-5 py-8 text-sm text-slate-400">No detailed attempts yet. The next monitoring cycle will appear here.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

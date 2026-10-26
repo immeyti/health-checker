@@ -19,7 +19,7 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 - **SMS alerts** on UP↔DOWN transitions via [Kavenegar](https://kavenegar.com) or [Twilio](https://twilio.com)
 - **Telegram alerts** via a bot to one or more chat IDs
 - **Manage targets from the web UI** — add, test and delete targets at `/targets` without a restart
-- **HTTP Basic Auth** on the web UI
+- **HTTP Basic Auth** on the web UI (disabled when `MONITOR_USERNAME`/`MONITOR_PASSWORD` are unset)
 - **Docker-first** — single `docker compose up -d` to run everything
 
 ---
@@ -68,6 +68,10 @@ check_interval: 300   # seconds between full monitoring cycles
 retries: 2            # re-check a DOWN target before recording it (avoids alerts on momentary blips)
 dashboard_retries: 1  # retries for dashboard logins
 retry_delay: 10       # seconds between attempts
+connectivity_hosts:   # "host:port" the monitor uses to check its own internet
+  - "1.1.1.1:443"       # (default; [] disables the check)
+  - "8.8.8.8:443"
+public_ip_url: "https://api.ipify.org"   # monitor's public IP for the CSV ("" disables)
 
 storage:
   retention_days: 30
@@ -148,12 +152,36 @@ Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (r
 |---|---|
 | `GET /api/status` | Current status of all targets |
 | `GET /api/status/{name}` | Status of a single target |
+| `GET /history/{name}` | Human-readable check log with outcomes, retries, and CSV downloads |
 | `GET /api/history/{name}` | Check log for a target (`?limit=100&offset=0`) |
+| `GET /api/history/{name}.csv` | Download final check outcomes as CSV (`?since=…&until=…`) |
+| `GET /api/attempts/{name}.csv` | Download a per-attempt diagnostic CSV, including failed retries (`?since=2026-10-22T10:00&until=2026-10-22T12:00`; times without a timezone are Tehran time; no row limit) |
 | `POST /api/targets` | Add a target (JSON body with `type`: `http` / `ping` / `tcp` / `dashboard`) |
 | `POST /api/targets/test` | Run one check for a target without saving it |
 | `DELETE /api/targets/{name}` | Delete a target added from the UI |
 
 All endpoints require HTTP Basic Auth with the same credentials as the web UI.
+Leave `MONITOR_USERNAME` and `MONITOR_PASSWORD` unset to disable auth (local use only — never on a public host).
+
+### Investigating intermittent failures
+
+Use **View check log** under a target on the status page. The log page shows
+recent outcomes and expandable check cycles, including retries. Download the
+incident CSV for existing final outcomes, including records from before this
+version was deployed. Download the attempt CSV for new per-attempt evidence.
+Each detailed-log row is one check attempt; attempts in the same cycle share a
+`cycle_id` and are numbered from 1.
+Rows with a `network_issue` value (`all_targets_failed` or `monitor_offline`)
+failed because of the monitor's own connection — leave them out of a report to
+the hosting provider.
+The CSV records UTC time, outcome, error, duration, the monitor's public IP
+(`source_ip`), and for HTTP checks the server IP that answered (`server_ip`, or
+`resolved_ips` from DNS when the connection failed), the status code, response host, redirect count, exception type, and selected server request
+headers. Response bodies and configured credentials are not included as diagnostic
+columns. Review error messages before sharing a CSV outside your organization.
+These attempt records use the configured retention period (30 days by default).
+The older `/api/history/{name}` endpoint contains only final cycle outcomes, so
+attempt details from before this version was deployed cannot be recovered.
 
 ---
 

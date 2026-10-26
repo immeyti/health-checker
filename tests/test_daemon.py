@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import socket
 from typing import Literal, Optional
 
@@ -18,6 +20,7 @@ from src.config import (
     TcpTarget,
     WebConfig,
 )
+from src.connectivity import ConnectivityProbe, PublicIPLookup
 from src.daemon import MonitoringDaemon
 from src.models import Alert, CheckResult
 from src.state import StateTracker
@@ -32,15 +35,16 @@ from tests.conftest import make_result
 class FixedResultChecker(BaseChecker):
     """Returns results from a pre-loaded list, one per call."""
 
-    def __init__(self, results: list[CheckResult]) -> None:
+    def __init__(self, results: list[CheckResult], name: str = "host-a") -> None:
         self._results = iter(results)
+        self._name = name
 
     async def check(self) -> CheckResult:
         return next(self._results)
 
     @property
     def name(self) -> str:
-        return "host-a"
+        return self._name
 
     @property
     def target_type(self) -> Literal["ping", "dashboard"]:
@@ -57,6 +61,14 @@ class RecordingChannel(BaseChannel):
     @classmethod
     def from_config(cls, config: dict) -> "RecordingChannel":
         return cls()
+
+
+class FakeConnectivity(ConnectivityProbe):
+    def __init__(self, online: bool = True) -> None:
+        self.online = online
+
+    async def is_online(self) -> bool:
+        return self.online
 
 
 class BrokenChannel(BaseChannel):
@@ -93,6 +105,9 @@ def _make_daemon(
     daemon._checkers = checkers
     daemon._channels = channels
     daemon._ui_channels = {}
+    daemon._connectivity = FakeConnectivity()
+    daemon._public_ip = PublicIPLookup("")
+    daemon._network_down = False
     daemon._running = False
     return daemon
 
@@ -264,6 +279,12 @@ async def test_retry_recovers_blip_without_alert(state: StateTracker) -> None:
     assert state.get_status("host-a").current_status == "UP"
     assert [log.status for log in state.get_history("host-a")] == ["UP", "UP"]
     assert channel.sent_alerts == []
+    attempts = state.get_attempts("host-a")
+    assert [(a["status"], a["attempt_number"]) for a in attempts] == [
+        ("UP", 1), ("DOWN", 1), ("UP", 2),
+    ]
+    assert attempts[1]["cycle_id"] == attempts[2]["cycle_id"]
+    assert attempts[0]["cycle_id"] != attempts[1]["cycle_id"]
 
 
 async def test_down_after_all_retries_alerts(state: StateTracker) -> None:
@@ -288,3 +309,99 @@ async def test_dashboard_uses_dashboard_retries(state: StateTracker) -> None:
     await daemon._run_cycle()
 
     assert checker.calls == 2
+
+
+# ---------------------------------------------------------------------------
+# Monitor's own network problems
+# ---------------------------------------------------------------------------
+
+
+def _site(name: str, *statuses: str) -> FixedResultChecker:
+    return FixedResultChecker([make_result(name=name, status=s) for s in statuses], name=name)
+
+
+async def test_all_targets_down_sends_one_network_alert(state: StateTracker) -> None:
+    checkers = [_site("a", "UP", "DOWN", "UP"), _site("b", "UP", "DOWN", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+
+    await daemon._run_cycle()  # both UP
+    await daemon._run_cycle()  # both DOWN together
+
+    assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
+        ("Monitor network", "UP_TO_DOWN"),
+    ]
+    assert "All 2 targets" in channel.sent_alerts[0].message
+    assert state.get_status("a").current_status == "UP"
+    assert [log.status for log in state.get_history("a")] == ["UP"]
+    attempts = state.get_attempts("a")  # the failed attempt is still kept
+    assert [(a["status"], a["network_issue"]) for a in attempts] == [
+        ("UP", None), ("DOWN", "all_targets_failed"),
+    ]
+
+    await daemon._run_cycle()  # back UP
+
+    assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
+        ("Monitor network", "UP_TO_DOWN"),
+        ("Monitor network", "DOWN_TO_UP"),
+    ]
+
+
+async def test_network_alert_sent_once_while_down(state: StateTracker) -> None:
+    checkers = [_site("a", "UP", "DOWN", "DOWN"), _site("b", "UP", "DOWN", "DOWN")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+
+    for _ in range(3):
+        await daemon._run_cycle()
+
+    assert len(channel.sent_alerts) == 1
+
+
+async def test_one_target_down_while_offline_is_not_recorded(state: StateTracker) -> None:
+    checkers = [_site("a", "UP", "DOWN"), _site("b", "UP", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+
+    await daemon._run_cycle()
+    daemon._connectivity = FakeConnectivity(online=False)
+    await daemon._run_cycle()
+
+    assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
+        ("Monitor network", "UP_TO_DOWN"),
+    ]
+    assert "Reference hosts" in channel.sent_alerts[0].message
+    assert state.get_attempts("a")[-1]["network_issue"] == "monitor_offline"
+    assert state.get_status("a").current_status == "UP"
+    assert [log.status for log in state.get_history("b")] == ["UP", "UP"]
+
+
+async def test_one_target_down_while_online_alerts_normally(state: StateTracker) -> None:
+    checkers = [_site("a", "UP", "DOWN"), _site("b", "UP", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+
+    await daemon._run_cycle()
+    await daemon._run_cycle()
+
+    assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [("a", "UP_TO_DOWN")]
+    assert state.get_status("a").current_status == "DOWN"
+    assert state.get_attempts("a")[-1]["network_issue"] is None
+
+
+async def test_connectivity_probe_reports_reachability() -> None:
+    server = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
+    open_port = server.sockets[0].getsockname()[1]
+    async with server:
+        assert await ConnectivityProbe([f"127.0.0.1:{_closed_port()}", f"127.0.0.1:{open_port}"]).is_online()
+        assert not await ConnectivityProbe([f"127.0.0.1:{_closed_port()}"], timeout=1).is_online()
+        assert await ConnectivityProbe([]).is_online()
+
+
+async def test_attempts_record_monitor_public_ip(state: StateTracker) -> None:
+    daemon = _make_daemon([_site("a", "UP")], [], state)
+    daemon._public_ip.value = "198.51.100.4"
+
+    await daemon._run_cycle()
+
+    assert json.loads(state.get_attempts("a")[0]["diagnostics"])["source_ip"] == "198.51.100.4"

@@ -36,6 +36,7 @@ src/
   state.py         # SQLite StateTracker — tables: target_states + check_logs + targets (UI-added)
   crypto.py        # Fernet encrypt/decrypt with MONITOR_SECRET_KEY (UI dashboard passwords)
   daemon.py        # async monitoring loop, concurrent checkers, alert dispatch
+  connectivity.py  # ConnectivityProbe (is the monitor online?) + PublicIPLookup (source IP)
 
   checkers/
     base.py        # abstract BaseChecker
@@ -116,6 +117,8 @@ alerts:
 - `check_logs` — append-only history, purged after `retention_days`
 - **No alert on first check** — alert only on UP↔DOWN transition
 - **Retries before DOWN** — a failed check is retried `retries` times (`dashboard_retries` for dashboards) `retry_delay` seconds apart; DOWN is recorded only if every attempt fails. The UI Test button does not retry
+- **Monitor network guard** — after retries, if every target (2+) is DOWN in the same cycle, or a target is DOWN and none of `connectivity_hosts` (default `1.1.1.1:443`, `8.8.8.8:443`) is reachable, the DOWN results are not recorded and a single "Monitor network" alert is sent instead (plus one on recovery). Attempts are still kept in `check_attempts`, flagged with `network_issue`
+- **Provider evidence** — each attempt's diagnostics hold `source_ip` (public IP from `public_ip_url`, cached 10 min) and, for HTTP, `server_ip` (or `resolved_ips` on failure); the CSV exports take `since`/`until` (naive = Tehran time) with no row limit
 - `consecutive_failures` column available for future "alert after N failures" logic
 
 ### Dashboard checker (`checkers/dashboard.py`)
@@ -200,7 +203,7 @@ pytest -k "transition"
 | `tests/test_http.py` | HTTPChecker — status codes, redirects, timeout, body text (respx) (8 cases) |
 | `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
 | `tests/test_channels.py` | SMSChannel, TelegramChannel (incl. forum topic) + build_channel (7 cases) |
-| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once, retries (10 cases) |
+| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once, retries, monitor network guard (15 cases) |
 | `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (24 cases) |
 
 ### Testing rules (from CLAUDE.md)
