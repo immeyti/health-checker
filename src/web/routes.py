@@ -22,12 +22,19 @@ from ..state import StateTracker
 _TEHRAN = ZoneInfo("Asia/Tehran")
 
 
-def _export_range(since: datetime | None, until: datetime | None) -> tuple[datetime | None, datetime | None]:
-    """Times without a timezone (e.g. from the log page form) are Tehran time."""
-    since, until = (
-        dt.replace(tzinfo=_TEHRAN) if dt and dt.tzinfo is None else dt
-        for dt in (since, until)
-    )
+def _parse_export_time(value: str | None, field: str) -> datetime | None:
+    """Empty means no bound (blank form field); times without a timezone are Tehran time."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(422, f"{field} must be a date and time like 2026-10-22T10:00")
+    return dt.replace(tzinfo=_TEHRAN) if dt.tzinfo is None else dt
+
+
+def _export_range(since: str | None, until: str | None) -> tuple[datetime | None, datetime | None]:
+    since, until = _parse_export_time(since, "since"), _parse_export_time(until, "until")
     if since and until and since > until:
         raise HTTPException(422, "since must be before until")
     return since, until
@@ -166,8 +173,8 @@ def build_router(
         return JSONResponse(content=status.model_dump(mode="json"))
 
     @router.get("/api/history/{target_name}.csv")
-    async def export_history(target_name: str, since: datetime | None = None,
-                             until: datetime | None = None):
+    async def export_history(target_name: str, since: str | None = None,
+                             until: str | None = None):
         since, until = _export_range(since, until)
         output = io.StringIO()
         writer = csv.writer(output)
@@ -189,8 +196,8 @@ def build_router(
         )
 
     @router.get("/api/attempts/{target_name}.csv")
-    async def export_attempts(target_name: str, since: datetime | None = None,
-                              until: datetime | None = None):
+    async def export_attempts(target_name: str, since: str | None = None,
+                              until: str | None = None):
         since, until = _export_range(since, until)
 
         output = io.StringIO()

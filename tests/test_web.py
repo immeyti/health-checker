@@ -348,3 +348,15 @@ def test_history_page_has_range_form(web_client: TestClient) -> None:
     response = web_client.get("/history/host-a")
     assert 'type="datetime-local" name="since"' in response.text
     assert 'formaction="/api/history/host-a.csv"' in response.text
+
+
+def test_csv_export_treats_blank_form_fields_as_no_bound(web_client: TestClient) -> None:
+    for path in ("/api/history/host-a.csv", "/api/attempts/host-a.csv"):
+        response = web_client.get(f"{path}?since=&until=")
+        assert response.status_code == 200, path
+
+
+def test_csv_export_rejects_malformed_time(web_client: TestClient) -> None:
+    response = web_client.get("/api/attempts/host-a.csv", params={"since": "yesterday"})
+    assert response.status_code == 422
+    assert "since must be a date and time" in response.json()["detail"]

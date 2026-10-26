@@ -15,7 +15,7 @@
     </div>
   </div>
 
-  <form method="get" action="/api/attempts/{{ target_name | urlencode }}.csv"
+  <form id="export-form" method="get" action="/api/attempts/{{ target_name | urlencode }}.csv"
         class="rounded-2xl border border-slate-800 bg-slate-900 p-5 mb-8">
     <h2 class="text-base font-semibold text-slate-100">Download for your hosting provider</h2>
     <p class="text-xs text-slate-400 mt-1 mb-4">Pick the window in Tehran time; leave a field empty for all retained data. Rows with a <span class="font-mono">network_issue</span> value failed on the monitor's side — leave them out when reporting to the provider.</p>
@@ -33,6 +33,7 @@
       <button type="submit" formaction="/api/history/{{ target_name | urlencode }}.csv"
               class="inline-flex items-center justify-center min-h-11 px-4 rounded-lg border border-slate-600 text-sm text-slate-200 hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-emerald-400">Download outcome CSV</button>
     </div>
+    <p id="export-error" role="alert" class="hidden mt-3 text-sm text-red-300"></p>
   </form>
 
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
@@ -163,4 +164,30 @@
       {% endif %}
     </section>
   </div>
+
+  <script>
+    (() => {
+      const form = document.getElementById("export-form");
+      const since = form.elements.since;
+      const until = form.elements.until;
+      const error = document.getElementById("export-error");
+
+      const showError = (message) => {
+        error.textContent = message;
+        error.classList.toggle("hidden", !message);
+      };
+      [since, until].forEach((input) => input.addEventListener("input", () => showError("")));
+
+      form.addEventListener("submit", (event) => {
+        if (since.value && until.value && since.value > until.value) {
+          event.preventDefault();
+          showError("“From” must be earlier than “To”.");
+          return;
+        }
+        // Leave blank fields out of the URL instead of sending since=&until=
+        [since, until].forEach((input) => { input.disabled = !input.value; });
+        setTimeout(() => [since, until].forEach((input) => { input.disabled = false; }));
+      });
+    })();
+  </script>
 {% endblock %}
