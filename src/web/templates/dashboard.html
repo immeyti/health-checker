@@ -9,6 +9,15 @@
   .tl-down    { background: #ef4444; }
   .tl-unknown { background: #1e293b; border: 1px solid #334155; }
 
+  /* Timeline period switch */
+  .period-bar { display: flex; justify-content: flex-end; margin-bottom: .75rem; }
+  .period-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px;
+                   background: #0f172a; border: 1px solid #1e293b; }
+  .period-switch a { padding: 4px 12px; border-radius: 6px; font-size: 12px;
+                     font-weight: 600; color: #64748b; transition: color .15s, background .15s; }
+  .period-switch a:hover { color: #e2e8f0; }
+  .period-switch a.active { background: #1e293b; color: #34d399; }
+
   /* Video thumbnail */
   .video-thumb { width: 96px; height: 60px; object-fit: cover; border-radius: 6px;
                  border: 1px solid #334155; cursor: pointer; display: block;
@@ -69,6 +78,14 @@
 
   {# ── Targets table ────────────────────────────────────────────────── #}
   {% if statuses %}
+  {% set periods = {"day": "24h", "week": "7d", "month": "30d"} %}
+  <div class="period-bar">
+    <nav class="period-switch" aria-label="Timeline range">
+      {% for p, label in periods.items() %}
+        <a href="?period={{ p }}" class="{{ 'active' if p == period }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
   <div class="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
     <table class="w-full text-sm">
       <thead>
@@ -79,7 +96,7 @@
           <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Uptime {{ retention_days }}d</th>
           <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Avg Latency</th>
           <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Last Checked</th>
-          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">24h Timeline</th>
+          <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">{{ periods[period] }} Timeline</th>
           <th class="text-left text-xs font-semibold uppercase tracking-widest text-slate-500 px-4 py-3">Recording</th>
         </tr>
       </thead>
@@ -155,10 +172,10 @@
             <span class="text-slate-500">{{ (s.last_checked|tehran).strftime("%H:%M") }} Tehran</span>
           </td>
 
-          {# 24h timeline #}
+          {# Timeline #}
           <td class="px-4 py-4">
-            <div class="flex gap-0.5 items-center" title="24h status — oldest left, newest right">
-              {% for bucket in s.timeline_24h %}
+            <div class="flex gap-0.5 items-center" title="{{ periods[period] }} status — oldest left, newest right">
+              {% for bucket in s.timeline %}
                 {% if bucket == "UP" %}
                   <div class="tl-block tl-up" title="UP"></div>
                 {% elif bucket == "DOWN" %}

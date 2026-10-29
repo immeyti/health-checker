@@ -32,7 +32,7 @@ class TargetStatus(BaseModel):
     # Computed fields populated by StateTracker
     uptime_pct: Optional[float] = None
     avg_latency_ms: Optional[float] = None
-    timeline_24h: list[str] = []  # list of 24 hourly buckets: "UP", "DOWN", or "UNKNOWN"
+    timeline: list[str] = []  # buckets for the selected period: "UP", "DOWN", or "UNKNOWN"
     screenshot_path: Optional[str] = None
 
 

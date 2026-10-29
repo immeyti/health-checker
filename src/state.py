@@ -11,6 +11,13 @@ from .config import DashboardTarget, HttpTarget, PingTarget, SuccessIndicator, T
 from .crypto import decrypt, encrypt
 from .models import Alert, CheckLog, CheckResult, TargetStatus
 
+# period -> (bucket count, bucket size, strftime key)
+TIMELINE_PERIODS = {
+    "day": (24, timedelta(hours=1), "%Y-%m-%dT%H"),
+    "week": (7, timedelta(days=1), "%Y-%m-%d"),
+    "month": (30, timedelta(days=1), "%Y-%m-%d"),
+}
+
 logger = logging.getLogger(__name__)
 
 _CREATE_STATES_TABLE = """
@@ -269,13 +276,13 @@ class StateTracker:
     # Queries for the web dashboard
     # ------------------------------------------------------------------
 
-    def get_all_statuses(self, retention_days: int = 30) -> list[TargetStatus]:
+    def get_all_statuses(self, retention_days: int = 30, period: str = "day") -> list[TargetStatus]:
         rows = self._conn.execute(
             "SELECT * FROM target_states ORDER BY name"
         ).fetchall()
         result = []
         for row in rows:
-            ts = self._row_to_status(row, retention_days)
+            ts = self._row_to_status(row, retention_days, period)
             result.append(ts)
         return result
 
@@ -425,7 +432,7 @@ class StateTracker:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _row_to_status(self, row: sqlite3.Row, retention_days: int) -> TargetStatus:
+    def _row_to_status(self, row: sqlite3.Row, retention_days: int, period: str = "day") -> TargetStatus:
         ts = TargetStatus(
             name=row["name"],
             target_type=row["target_type"],
@@ -439,7 +446,7 @@ class StateTracker:
         )
         ts.uptime_pct = self._calc_uptime(row["name"], retention_days)
         ts.avg_latency_ms = self._calc_avg_latency(row["name"], retention_days)
-        ts.timeline_24h = self._calc_timeline_24h(row["name"])
+        ts.timeline = self._calc_timeline(row["name"], period)
         return ts
 
     def _calc_uptime(self, target_name: str, retention_days: int) -> Optional[float]:
@@ -476,41 +483,43 @@ class StateTracker:
             return None
         return round(row["avg_lat"], 2)
 
-    def _calc_timeline_24h(self, target_name: str) -> list[str]:
-        """Return list of 24 hourly bucket statuses (oldest→newest).
+    def _calc_timeline(self, target_name: str, period: str) -> list[str]:
+        """Return bucket statuses for the period (oldest→newest): hourly for
+        'day', daily for 'week' and 'month'.
         Each bucket is 'UP', 'DOWN', or 'UNKNOWN' if no data."""
+        count, step, fmt = TIMELINE_PERIODS[period]
         now = datetime.now(timezone.utc)
-        cutoff = (now - timedelta(hours=24)).isoformat()
+        cutoff = (now - step * count).isoformat()
 
         rows = self._conn.execute(
             """
             SELECT
-                strftime('%Y-%m-%dT%H', checked_at) AS hour_bucket,
+                strftime(?, checked_at) AS bucket,
                 SUM(CASE WHEN status = 'UP' THEN 1 ELSE 0 END) AS up_count,
                 COUNT(*) AS total
             FROM check_logs
             WHERE target_name = ? AND checked_at >= ?
-            GROUP BY hour_bucket
-            ORDER BY hour_bucket ASC
+            GROUP BY bucket
+            ORDER BY bucket ASC
             """,
-            (target_name, cutoff),
+            (fmt, target_name, cutoff),
         ).fetchall()
 
-        # Build a map: hour_str -> status
+        # Build a map: bucket_str -> status
         bucket_map: dict[str, str] = {}
         for r in rows:
             if r["total"] == 0:
-                bucket_map[r["hour_bucket"]] = "UNKNOWN"
+                bucket_map[r["bucket"]] = "UNKNOWN"
             elif r["up_count"] == r["total"]:
-                bucket_map[r["hour_bucket"]] = "UP"
+                bucket_map[r["bucket"]] = "UP"
             elif r["up_count"] == 0:
-                bucket_map[r["hour_bucket"]] = "DOWN"
+                bucket_map[r["bucket"]] = "DOWN"
             else:
-                bucket_map[r["hour_bucket"]] = "DOWN"  # partial DOWN counts as DOWN
+                bucket_map[r["bucket"]] = "DOWN"  # partial DOWN counts as DOWN
 
         timeline = []
-        for i in range(24):
-            hour = now - timedelta(hours=23 - i)
-            key = hour.strftime("%Y-%m-%dT%H")
+        for i in range(count):
+            bucket_time = now - step * (count - 1 - i)
+            key = bucket_time.strftime(fmt)
             timeline.append(bucket_map.get(key, "UNKNOWN"))
         return timeline

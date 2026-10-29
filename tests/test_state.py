@@ -69,16 +69,16 @@ def test_uptime_pct_calculation(state):
     assert status.uptime_pct == 75.0
 
 
-def test_timeline_24h_length(state):
+def test_timeline_length(state):
     state.update(make_result(status="UP"))
     status = state.get_status("host-a")
-    assert len(status.timeline_24h) == 24
+    assert len(status.timeline) == 24
 
 
-def test_timeline_24h_current_hour_is_up(state):
+def test_timeline_current_hour_is_up(state):
     state.update(make_result(status="UP"))
     status = state.get_status("host-a")
-    assert status.timeline_24h[-1] == "UP"
+    assert status.timeline[-1] == "UP"
 
 
 def test_purge_removes_old_entries(state):

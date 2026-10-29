@@ -6,6 +6,7 @@ import json
 import re
 import secrets
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -86,8 +87,8 @@ def build_router(
     )
 
     @router.get("/", response_class=HTMLResponse)
-    async def dashboard(request: Request):
-        statuses = state.get_all_statuses(retention_days=retention_days)
+    async def dashboard(request: Request, period: Literal["day", "week", "month"] = "day"):
+        statuses = state.get_all_statuses(retention_days=retention_days, period=period)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -95,6 +96,7 @@ def build_router(
                 "statuses": statuses,
                 "retention_days": retention_days,
                 "host_map": host_map,
+                "period": period,
             },
         )
 
