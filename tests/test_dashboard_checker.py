@@ -95,3 +95,23 @@ async def test_video_handle_none_path(tmp_path):
 
     assert result_success is None
     assert result_failure is None
+
+
+async def test_check_cut_off_by_close_keeps_last_failure_video(tmp_path) -> None:
+    target = DashboardTarget(
+        name="panel", url="https://panel.example.com/login", username="a", password="b",
+        success_indicator=SuccessIndicator(type="url_contains", value="/home"),
+    )
+    checker = DashboardChecker(target, screenshots_dir=str(tmp_path / "screenshots"))
+    videos = tmp_path / "videos"
+    videos.mkdir()
+    kept = videos / "panel.webm"
+    kept.write_bytes(b"last failure")
+    partial = videos / "page@cut-off.webm"
+    partial.write_bytes(b"")
+
+    await checker.close()
+
+    assert await checker._handle_recording(False, str(partial)) is None
+    assert not partial.exists()
+    assert kept.read_bytes() == b"last failure"

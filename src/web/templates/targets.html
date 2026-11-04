@@ -9,6 +9,8 @@
   .type-card input:checked + div { border-color: #10b981; background: rgba(6, 78, 59, .35); }
   .type-card input:checked + div .type-title { color: #6ee7b7; }
   .type-card input:focus-visible + div { outline: 2px solid #10b981; outline-offset: 2px; }
+  .type-card:has(input:disabled) { cursor: not-allowed; }
+  .type-card input:disabled + div { opacity: .4; border-color: #334155; }
   .field { width: 100%; border-radius: .5rem; background: #020617; border: 1px solid #334155;
            padding: .55rem .75rem; color: #e2e8f0; font-size: .875rem; }
   .field:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
@@ -22,13 +24,18 @@
 
   <div class="mb-8">
     <h1 class="text-xl font-semibold text-slate-100">Targets</h1>
-    <p class="text-sm text-slate-500 mt-1">Add servers and dashboards to monitor. Changes apply from the next check cycle — no restart needed.</p>
+    <p class="text-sm text-slate-500 mt-1">Add, edit or stop servers and dashboards. Changes apply from the next check cycle — no restart needed.</p>
   </div>
 
   <div class="grid gap-6 lg:grid-cols-5 items-start">
 
     {# ── Add form ───────────────────────────────────────────────────── #}
     <form id="target-form" class="lg:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 grid gap-6" novalidate>
+
+      <div id="edit-banner" hidden class="flex items-center gap-3 rounded-xl border border-emerald-800/60 bg-emerald-950/40 px-4 py-3">
+        <p class="min-w-0 flex-1 text-sm text-emerald-300 truncate">Editing <span id="edit-name" class="font-semibold"></span></p>
+        <button type="button" id="cancel-edit" class="text-xs px-2.5 py-1 rounded-lg text-slate-300 ring-1 ring-slate-700 hover:bg-slate-800">Cancel</button>
+      </div>
 
       <div>
         <p class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">1 · What to check</p>
@@ -87,9 +94,15 @@
               <span class="text-xs text-slate-500">DOWN if this text appears on the page.</span>
             </label>
           </div>
-          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
-            <input name="timeout" type="number" min="1" value="10000" class="field">
-          </label>
+<div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300">Timeout (ms)
+              <input name="timeout" type="number" min="1" value="10000" class="field">
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Max latency (ms) <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="max_latency" type="number" min="1" class="field" placeholder="No limit">
+              <span class="text-xs text-slate-500">DOWN if a successful check takes longer.</span>
+            </label>
+          </div>
         </fieldset>
 
         <fieldset data-type="dashboard" class="grid gap-4">
@@ -101,8 +114,8 @@
               <input name="username" required autocomplete="off" class="field">
             </label>
             <label class="grid gap-1.5 text-sm text-slate-300">Password
-              <input name="password" type="password" required autocomplete="new-password" class="field">
-              <span class="text-xs text-slate-500">Stored encrypted.</span>
+              <input name="password" id="password" type="password" required autocomplete="new-password" class="field">
+              <span id="password-help" class="text-xs text-slate-500">Stored encrypted.</span>
             </label>
           </div>
           <div class="grid gap-4 sm:grid-cols-2">
@@ -118,16 +131,32 @@
             </label>
           </div>
           <p id="indicator-help" class="text-xs text-slate-500 -mt-2"></p>
-          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
-            <input name="timeout" type="number" min="1" value="15000" class="field">
-            <span class="text-xs text-slate-500">Raise it for slow panels (e.g. 45000).</span>
-          </label>
+<div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300">Timeout (ms)
+              <input name="timeout" type="number" min="1" value="15000" class="field">
+              <span class="text-xs text-slate-500">Raise it for slow panels (e.g. 45000).</span>
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Max latency (ms) <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="max_latency" type="number" min="1" class="field" placeholder="No limit">
+              <span class="text-xs text-slate-500">Includes the pauses added for the video, so a login takes several seconds. Set it high.</span>
+            </label>
+          </div>
         </fieldset>
 
         <fieldset data-type="ping" class="grid gap-4">
           <label class="grid gap-1.5 text-sm text-slate-300">Host or IP
             <input name="host" required class="field font-mono" placeholder="1.2.3.4 or server.example.com">
           </label>
+          <div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300">Timeout (ms)
+              <input name="timeout" type="number" min="1" value="3000" class="field">
+              <span class="text-xs text-slate-500">Rounded up to whole seconds.</span>
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Max latency (ms) <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="max_latency" type="number" min="1" class="field" placeholder="No limit">
+              <span class="text-xs text-slate-500">DOWN if a successful check takes longer.</span>
+            </label>
+          </div>
         </fieldset>
 
         <fieldset data-type="tcp" class="grid gap-4">
@@ -139,9 +168,15 @@
               <input name="port" type="number" min="1" max="65535" required class="field" placeholder="443">
             </label>
           </div>
-          <label class="grid gap-1.5 text-sm text-slate-300 sm:w-1/2">Timeout (ms)
-            <input name="timeout" type="number" min="1" value="5000" class="field">
-          </label>
+<div class="grid gap-4 sm:grid-cols-2 items-start">
+            <label class="grid gap-1.5 text-sm text-slate-300">Timeout (ms)
+              <input name="timeout" type="number" min="1" value="5000" class="field">
+            </label>
+            <label class="grid gap-1.5 text-sm text-slate-300"><span>Max latency (ms) <span class="text-xs text-slate-500">(optional)</span></span>
+              <input name="max_latency" type="number" min="1" class="field" placeholder="No limit">
+              <span class="text-xs text-slate-500">DOWN if a successful check takes longer.</span>
+            </label>
+          </div>
         </fieldset>
       </div>
 
@@ -164,16 +199,28 @@
       {% if targets %}
       <ul class="divide-y divide-slate-800/70">
         {% for t in targets %}
-        <li class="px-5 py-3 flex items-center gap-3">
-          <div class="min-w-0 flex-1">
-            <p class="font-semibold text-slate-100 text-sm truncate">{{ t.name }}</p>
-            <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ host_map.get(t.name, "") }}</p>
+        {% set is_paused = t.name in paused %}
+        <li class="px-5 py-3 grid gap-2">
+          <div class="flex items-center gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="font-semibold text-slate-100 text-sm truncate">{{ t.name }}</p>
+              <p class="text-xs text-slate-500 mt-0.5 font-mono truncate">{{ host_map.get(t.name, "") }}</p>
+            </div>
+            {% if is_paused %}
+            <span class="text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-slate-800 text-slate-400 ring-1 ring-slate-700/50">Stopped</span>
+            {% endif %}
+            <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+              {{ "dashboard" if t.username is defined else "http" if t.url is defined else "tcp" if t.port is defined else "ping" }}
+            </span>
           </div>
-          <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-            {{ "dashboard" if t.username is defined else "http" if t.url is defined else "tcp" if t.port is defined else "ping" }}
-          </span>
-          <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
-                  data-name="{{ t.name }}">Delete</button>
+          <div class="flex items-center gap-2">
+            <button type="button" class="edit-btn text-xs px-2.5 py-1 rounded-lg text-slate-300 ring-1 ring-slate-700 hover:bg-slate-800"
+                    data-name="{{ t.name }}">Edit</button>
+            <button type="button" class="pause-btn text-xs px-2.5 py-1 rounded-lg text-slate-300 ring-1 ring-slate-700 hover:bg-slate-800"
+                    data-name="{{ t.name }}" data-action="{{ 'resume' if is_paused else 'pause' }}">{{ "Resume" if is_paused else "Stop" }}</button>
+            <button type="button" class="delete-btn text-xs px-2.5 py-1 rounded-lg text-red-400 ring-1 ring-red-900/60 hover:bg-red-950"
+                    data-name="{{ t.name }}">Delete</button>
+          </div>
         </li>
         {% endfor %}
       </ul>
@@ -247,9 +294,9 @@
       return body.detail.map(e => e.loc.slice(-1)[0] + ': ' + e.msg).join('\n');
     }
 
-    function post(url) {
+    function send(url, method = 'POST') {
       return fetch(url, {
-        method: 'POST',
+        method,
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(Object.fromEntries(new FormData(form))),
       });
@@ -265,11 +312,12 @@
       tick();
       const timer = setInterval(tick, 1000);
       try {
-        const resp = await post('/api/targets/test');
+        const query = editing === null ? '' : '?editing=' + encodeURIComponent(editing);
+        const resp = await send('/api/targets/test' + query);
         if (!resp.ok) return showResult('down', 'Invalid input', await errorText(resp));
         const r = await resp.json();
         const latency = r.latency_ms === null ? '' : ` · ${Math.round(r.latency_ms)} ms`;
-        if (r.status === 'UP') showResult('up', 'UP' + latency, 'Looks good — you can add this target.');
+        if (r.status === 'UP') showResult('up', 'UP' + latency, editing === null ? 'Looks good — you can add this target.' : 'Looks good — you can save this target.');
         else showResult('down', 'DOWN' + latency, r.error_message);
       } finally {
         clearInterval(timer);
@@ -281,10 +329,74 @@
       e.preventDefault();
       if (!form.reportValidity()) return;
       setBusy(true);
-      const resp = await post('/api/targets');
+      const resp = editing === null
+        ? await send('/api/targets')
+        : await send('/api/targets/' + encodeURIComponent(editing), 'PUT');
       if (resp.ok) return location.reload();
-      showResult('down', 'Could not add target', await errorText(resp));
+      showResult('down', editing === null ? 'Could not add target' : 'Could not save target', await errorText(resp));
       setBusy(false);
+    });
+
+    // The Add form doubles as the edit form; `editing` holds the target's current name
+    let editing = null;
+    const passwordEl = document.getElementById('password');
+    const passwordHelp = document.getElementById('password-help');
+
+    function setEditing(name) {
+      editing = name;
+      document.getElementById('edit-banner').hidden = name === null;
+      document.getElementById('edit-name').textContent = name;
+      addBtn.textContent = name === null ? 'Add target' : 'Save changes';
+      passwordEl.required = name === null;
+      passwordEl.placeholder = name === null ? '' : 'Leave blank to keep current';
+      passwordHelp.textContent = name === null
+        ? 'Stored encrypted.'
+        : 'Stored encrypted. Required again if you change the login URL.';
+    }
+
+    function fillForm(target) {
+      form.querySelectorAll('input[name=type]').forEach(r => {
+        r.checked = r.value === target.type;
+        r.disabled = !r.checked;  // a target's type can't change
+      });
+      toggleFieldsets();
+      const scope = form.querySelector(`fieldset[data-type=${target.type}]`);
+      form.querySelector('input[name=name]').value = target.name;
+      for (const [field, value] of Object.entries(target)) {
+        const el = scope.querySelector(`[name=${field}]`);
+        if (el) el.value = value ?? '';
+      }
+      updateIndicatorHelp();
+    }
+
+    document.querySelectorAll('.edit-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const resp = await fetch('/api/targets/' + encodeURIComponent(btn.dataset.name));
+        if (!resp.ok) return alert(await errorText(resp));
+        form.reset();
+        fillForm(await resp.json());
+        setEditing(btn.dataset.name);
+        form.scrollIntoView({behavior: 'smooth', block: 'start'});
+      });
+    });
+
+    document.getElementById('cancel-edit').addEventListener('click', () => {
+      form.reset();
+      form.querySelectorAll('input[name=type]').forEach(r => { r.disabled = false; });
+      toggleFieldsets();
+      updateIndicatorHelp();
+      setEditing(null);
+    });
+
+    document.querySelectorAll('.pause-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const url = `/api/targets/${encodeURIComponent(btn.dataset.name)}/${btn.dataset.action}`;
+        const resp = await fetch(url, {method: 'PUT'});
+        if (resp.ok) return location.reload();
+        btn.disabled = false;
+        alert(await errorText(resp));
+      });
     });
 
     document.querySelectorAll('.delete-btn').forEach(btn => {

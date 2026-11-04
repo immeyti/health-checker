@@ -23,3 +23,19 @@ async def test_ping_unreachable_returns_down():
     result = await checker.check()
     assert result.status == "DOWN"
     assert result.error_message is not None
+
+
+@pytest.mark.parametrize("timeout,seconds", [(3000, "3"), (1500, "2"), (200, "1")])
+def test_ping_wait_follows_timeout(monkeypatch, timeout, seconds):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    checker = PingChecker(PingTarget(name="x", host="10.0.0.1", timeout=timeout))
+    assert checker._ping_args() == ["ping", "-c", "1", "-W", seconds, "10.0.0.1"]
+
+
+async def test_ping_over_max_latency_is_down():
+    checker = PingChecker(PingTarget(name="loopback", host="127.0.0.1", max_latency=1))
+    checker._parse_latency = lambda stdout: 5.0
+    result = await checker.run()
+    assert result.status == "DOWN"
+    assert result.latency_ms == 5.0
+    assert result.error_message == "Latency 5 ms exceeds limit 1 ms"

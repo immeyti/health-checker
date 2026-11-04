@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import socket
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -360,3 +362,217 @@ def test_csv_export_rejects_malformed_time(web_client: TestClient) -> None:
     response = web_client.get("/api/attempts/host-a.csv", params={"since": "yesterday"})
     assert response.status_code == 422
     assert "since must be a date and time" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Editing and stopping targets
+# ---------------------------------------------------------------------------
+
+
+DASHBOARD_BODY = {
+    "type": "dashboard", "name": "panel", "url": "https://panel.example.com/login",
+    "username": "admin", "password": "s3cret-value",
+    "indicator_type": "url_contains", "indicator_value": "/home",
+}
+
+
+def test_edit_target_applies_settings(web_client: TestClient, seeded_state, daemon) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    body = {**PING_BODY, "host": "10.0.0.9", "timeout": 1000, "max_latency": 250}
+    response = web_client.put("/api/targets/ui-host", json=body)
+    assert response.status_code == 200
+    saved = seeded_state.get_target("ui-host")
+    assert (saved.host, saved.timeout, saved.max_latency) == ("10.0.0.9", 1000, 250)
+    assert daemon.has_target("ui-host")
+    assert "10.0.0.9" in web_client.get("/targets").text
+
+
+def test_edit_target_rename_keeps_history(web_client: TestClient, seeded_state, daemon) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    seeded_state.update(make_result(name="ui-host", status="UP"))
+    response = web_client.put("/api/targets/ui-host", json={**PING_BODY, "name": "renamed"})
+    assert response.status_code == 200
+    assert daemon.has_target("renamed") and not daemon.has_target("ui-host")
+    assert len(web_client.get("/api/history/renamed").json()) == 1
+    assert web_client.get("/api/status/ui-host").status_code == 404
+
+
+def test_edit_unknown_or_yaml_target_404(web_client: TestClient) -> None:
+    assert web_client.put("/api/targets/nope", json=PING_BODY).status_code == 404
+    assert web_client.put("/api/targets/loopback", json={**PING_BODY, "name": "loopback"}).status_code == 404
+
+
+def test_edit_target_rename_to_existing_conflicts(web_client: TestClient) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    response = web_client.put("/api/targets/ui-host", json={**PING_BODY, "name": "loopback"})
+    assert response.status_code == 409
+
+
+def test_edit_target_cannot_change_type(web_client: TestClient) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    body = {"type": "tcp", "name": "ui-host", "host": "10.0.0.1", "port": 443}
+    assert web_client.put("/api/targets/ui-host", json=body).status_code == 422
+
+
+def test_edit_dashboard_blank_password_keeps_current(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/targets", json=DASHBOARD_BODY)
+    body = {**DASHBOARD_BODY, "password": "", "username": "root"}
+    assert web_client.put("/api/targets/panel", json=body).status_code == 200
+    saved = seeded_state.get_target("panel")
+    assert (saved.username, saved.password) == ("root", "s3cret-value")
+
+
+def test_edit_dashboard_new_password_replaces_current(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/targets", json=DASHBOARD_BODY)
+    assert web_client.put("/api/targets/panel", json={**DASHBOARD_BODY, "password": "changed"}).status_code == 200
+    assert seeded_state.get_target("panel").password == "changed"
+
+
+def test_edit_dashboard_new_url_requires_password(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/targets", json=DASHBOARD_BODY)
+    body = {**DASHBOARD_BODY, "password": "", "url": "https://elsewhere.example.com/login"}
+    assert web_client.put("/api/targets/panel", json=body).status_code == 422
+    assert web_client.post("/api/targets/test?editing=panel", json=body).status_code == 422
+    assert seeded_state.get_target("panel").url == DASHBOARD_BODY["url"]
+
+
+def test_add_dashboard_without_password_422(web_client: TestClient) -> None:
+    body = {**DASHBOARD_BODY, "password": ""}
+    assert web_client.post("/api/targets", json=body).status_code == 422
+    assert web_client.post("/api/targets/test", json=body).status_code == 422
+
+
+def test_get_target_never_returns_password(web_client: TestClient) -> None:
+    web_client.post("/api/targets", json=DASHBOARD_BODY)
+    response = web_client.get("/api/targets/panel")
+    assert response.status_code == 200
+    assert "s3cret-value" not in response.text
+    values = response.json()
+    assert "password" not in values
+    assert values["type"] == "dashboard"
+    assert values["indicator_type"] == "url_contains"
+    assert values["indicator_value"] == "/home"
+    assert values["paused"] is False
+
+
+def test_get_yaml_target_404(web_client: TestClient) -> None:
+    assert web_client.get("/api/targets/loopback").status_code == 404
+
+
+def test_pause_and_resume_target(web_client: TestClient, seeded_state, daemon) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    assert web_client.put("/api/targets/ui-host/pause").status_code == 204
+    assert seeded_state.get_paused_targets() == {"ui-host"}
+    assert daemon._paused == {"ui-host"}
+    assert web_client.get("/api/targets/ui-host").json()["paused"] is True
+    assert "Resume" in web_client.get("/targets").text
+
+    assert web_client.put("/api/targets/ui-host/resume").status_code == 204
+    assert seeded_state.get_paused_targets() == set()
+    assert daemon._paused == set()
+
+
+def test_pause_unknown_or_yaml_target_404(web_client: TestClient, daemon) -> None:
+    assert web_client.put("/api/targets/nope/pause").status_code == 404
+    assert web_client.put("/api/targets/loopback/pause").status_code == 404
+    assert web_client.put("/api/targets/loopback/resume").status_code == 404
+    assert daemon._paused == set()
+
+
+def test_stopped_target_is_badged_and_left_out_of_counts(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    seeded_state.update(make_result(name="ui-host", status="DOWN"))
+    assert 'text-red-400">1<' in web_client.get("/").text.replace("\n", "")
+
+    web_client.put("/api/targets/ui-host/pause")
+
+    page = web_client.get("/").text
+    assert "Stopped" in page
+    assert 'text-red-400">1<' not in page.replace("\n", "")
+    assert "STOPPED" in web_client.get("/history/ui-host").text
+    assert web_client.get("/api/status/ui-host").json()["paused"] is True
+
+
+def test_blank_max_latency_means_no_limit(web_client: TestClient, seeded_state) -> None:
+    response = web_client.post("/api/targets", json={**PING_BODY, "max_latency": ""})
+    assert response.status_code == 201
+    assert seeded_state.get_target("ui-host").max_latency is None
+
+
+@pytest.mark.parametrize("value", [0, -5, "abc"])
+def test_invalid_max_latency_422(web_client: TestClient, value) -> None:
+    assert web_client.post("/api/targets", json={**PING_BODY, "max_latency": value}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [("get", "/api/targets/x"), ("put", "/api/targets/x"), ("put", "/api/targets/x/pause"), ("put", "/api/targets/x/resume")],
+)
+def test_edit_and_stop_routes_require_auth(unauthenticated_client: TestClient, method: str, path: str) -> None:
+    response = unauthenticated_client.request(method, path, json=PING_BODY)
+    assert response.status_code == 401
+
+
+def test_stop_rejects_post_so_other_sites_cannot_trigger_it(web_client: TestClient, seeded_state) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    assert web_client.post("/api/targets/ui-host/pause").status_code == 405
+    assert seeded_state.get_paused_targets() == set()
+
+
+@pytest.mark.parametrize("ctype", ["text/plain", "application/x-www-form-urlencoded"])
+def test_add_target_rejects_cross_site_content_types(web_client: TestClient, daemon, ctype: str) -> None:
+    response = web_client.post(
+        "/api/targets", content=json.dumps(PING_BODY), headers={"Content-Type": ctype}
+    )
+    assert response.status_code == 422
+    assert not daemon.has_target("ui-host")
+
+
+@pytest.mark.parametrize("name", ["a/b", "/", "   "])
+def test_unaddressable_target_names_422(web_client: TestClient, name: str) -> None:
+    assert web_client.post("/api/targets", json={**PING_BODY, "name": name}).status_code == 422
+
+
+def test_rename_to_slash_name_422(web_client: TestClient, daemon) -> None:
+    web_client.post("/api/targets", json=PING_BODY)
+    assert web_client.put("/api/targets/ui-host", json={**PING_BODY, "name": "a/b"}).status_code == 422
+    assert daemon.has_target("ui-host")
+
+
+@pytest.mark.parametrize("name", ["x.csv", "a#b?c%d", "test", "<img src=x onerror=alert(1)>"])
+def test_unusual_target_names_stay_manageable(web_client: TestClient, name: str) -> None:
+    path = "/api/targets/" + quote(name, safe="")
+    assert web_client.post("/api/targets", json={**PING_BODY, "name": name}).status_code == 201
+    assert web_client.get(path).json()["name"] == name
+    assert web_client.put(path + "/pause").status_code == 204
+    assert web_client.put(path + "/resume").status_code == 204
+    assert web_client.delete(path).status_code == 204
+
+
+def test_target_name_is_escaped_in_pages(web_client: TestClient, seeded_state) -> None:
+    name = "<img src=x onerror=alert(1)>"
+    web_client.post("/api/targets", json={**PING_BODY, "name": name})
+    seeded_state.update(make_result(name=name, status="UP"))
+    assert name not in web_client.get("/targets").text
+    assert name not in web_client.get("/").text
+
+
+@pytest.mark.parametrize("host", ["-h", "-f", "1.2.3.4 -f", " x"])
+def test_ping_host_that_would_be_an_option_422(web_client: TestClient, host: str) -> None:
+    assert web_client.post("/api/targets", json={**PING_BODY, "host": host}).status_code == 422
+    assert web_client.post("/api/targets/test", json={**PING_BODY, "host": host}).status_code == 422
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "chrome://version", "javascript:alert(1)", "panel.example.com"])
+def test_dashboard_url_must_be_http(web_client: TestClient, url: str) -> None:
+    assert web_client.post("/api/targets", json={**DASHBOARD_BODY, "url": url}).status_code == 422
+    assert web_client.post("/api/targets/test", json={**DASHBOARD_BODY, "url": url}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [PING_BODY, {"type": "http", "name": "h", "url": "https://x.example"}, {"type": "tcp", "name": "t", "host": "h", "port": 1}, DASHBOARD_BODY],
+)
+def test_timeout_has_an_upper_limit(web_client: TestClient, body: dict) -> None:
+    assert web_client.post("/api/targets", json={**body, "timeout": 120_001}).status_code == 422
+    assert web_client.post("/api/targets", json={**body, "timeout": 120_000}).status_code == 201

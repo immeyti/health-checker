@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 import json
 import re
@@ -14,13 +15,35 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from ..config import target_host
+from ..config import DashboardTarget, Target, target_host
 from ..daemon import MonitoringDaemon
-from ..models import ChannelIn, TargetIn
-from ..state import StateTracker
+from ..models import ChannelIn, DashboardTargetIn, TargetIn
+from ..state import StateTracker, target_type
 
 
 _TEHRAN = ZoneInfo("Asia/Tehran")
+
+
+def _fill_password(body: TargetIn, current: Target | None) -> None:
+    """A blank dashboard password keeps the stored one, but never sends it to a new URL."""
+    if not isinstance(body, DashboardTargetIn) or body.password:
+        return
+    if not isinstance(current, DashboardTarget):
+        raise HTTPException(422, "password is required")
+    if current.url != body.url:
+        raise HTTPException(422, "Enter the password again when changing the login URL")
+    body.password = current.password
+
+
+def _form_values(target: Target) -> dict:
+    """A target as the /targets form fields, without the dashboard password."""
+    values = {**dataclasses.asdict(target), "type": target_type(target)}
+    values.pop("password", None)
+    indicator = values.pop("success_indicator", None)
+    if indicator:
+        values["indicator_type"] = indicator["type"]
+        values["indicator_value"] = indicator["value"]
+    return values
 
 
 def _parse_export_time(value: str | None, field: str) -> datetime | None:
@@ -234,13 +257,18 @@ def build_router(
         return templates.TemplateResponse(
             request=request,
             name="targets.html",
-            context={"targets": state.get_targets(), "host_map": host_map},
+            context={
+                "targets": state.get_targets(),
+                "paused": state.get_paused_targets(),
+                "host_map": host_map,
+            },
         )
 
     @router.post("/api/targets", status_code=201)
     async def add_target(body: TargetIn):
         if daemon.has_target(body.name):
             raise HTTPException(status.HTTP_409_CONFLICT, f"Target '{body.name}' already exists")
+        _fill_password(body, None)
         target = body.to_target()
         state.add_target(target)
         daemon.add_target(target)
@@ -248,13 +276,57 @@ def build_router(
         return {"name": target.name}
 
     @router.post("/api/targets/test")
-    async def test_target(body: TargetIn):
+    async def test_target(body: TargetIn, editing: str | None = None):
+        _fill_password(body, state.get_target(editing) if editing else None)
         result = await daemon.check_once(body.to_target())
         return {
             "status": result.status,
             "latency_ms": result.latency_ms,
             "error_message": result.error_message,
         }
+
+    def _ui_target(name: str) -> Target:
+        target = state.get_target(name)
+        if target is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Target not found or defined in config.yaml"
+            )
+        return target
+
+    @router.get("/api/targets/{target_name}")
+    async def get_target(target_name: str):
+        return {
+            **_form_values(_ui_target(target_name)),
+            "paused": target_name in state.get_paused_targets(),
+        }
+
+    @router.put("/api/targets/{target_name}")
+    async def update_target(target_name: str, body: TargetIn):
+        current = _ui_target(target_name)
+        if body.type != target_type(current):
+            raise HTTPException(422, "A target's type can't be changed")
+        if body.name != target_name and daemon.has_target(body.name):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Target '{body.name}' already exists")
+        _fill_password(body, current)
+        target = body.to_target()
+        state.update_target(target_name, target)
+        await daemon.replace_target(target_name, target)
+        host_map.pop(target_name, None)
+        host_map[target.name] = target_host(target)
+        return {"name": target.name}
+
+    # PUT, not POST: a bodyless POST could be sent by any website the user visits (CSRF)
+    @router.put("/api/targets/{target_name}/pause", status_code=204)
+    async def pause_target(target_name: str):
+        _ui_target(target_name)
+        state.set_target_paused(target_name, True)
+        await daemon.pause_target(target_name)
+
+    @router.put("/api/targets/{target_name}/resume", status_code=204)
+    async def resume_target(target_name: str):
+        _ui_target(target_name)
+        state.set_target_paused(target_name, False)
+        daemon.resume_target(target_name)
 
     @router.delete("/api/targets/{target_name}", status_code=204)
     async def delete_target(target_name: str):

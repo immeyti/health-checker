@@ -10,6 +10,8 @@ targets:
   ping:
     - name: "My Server"
       host: "1.2.3.4"
+      timeout: 3000         # ms
+      # max_latency: 200    # optional, any target type — DOWN if a successful check takes longer (ms)
 
   tcp:
     - name: "My Server TCP"

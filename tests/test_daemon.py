@@ -21,7 +21,7 @@ from src.config import (
     WebConfig,
 )
 from src.connectivity import ConnectivityProbe, PublicIPLookup
-from src.daemon import MonitoringDaemon
+from src.daemon import _PLAYWRIGHT_SEMAPHORE, MonitoringDaemon
 from src.models import Alert, CheckResult
 from src.state import StateTracker
 from tests.conftest import make_result
@@ -108,6 +108,7 @@ def _make_daemon(
     daemon._connectivity = FakeConnectivity()
     daemon._public_ip = PublicIPLookup("")
     daemon._network_down = False
+    daemon._paused = set()
     daemon._running = False
     return daemon
 
@@ -405,3 +406,265 @@ async def test_attempts_record_monitor_public_ip(state: StateTracker) -> None:
     await daemon._run_cycle()
 
     assert json.loads(state.get_attempts("a")[0]["diagnostics"])["source_ip"] == "198.51.100.4"
+
+
+# ---------------------------------------------------------------------------
+# Editing and stopping targets
+# ---------------------------------------------------------------------------
+
+
+class SlowChecker(CountingChecker):
+    """Successful result with a fixed latency, limited by max_latency."""
+
+    def __init__(self, latencies: list[float], max_latency: Optional[int]) -> None:
+        super().__init__([make_result(status="UP", latency_ms=ms) for ms in latencies])
+        self._max_latency = max_latency
+
+    @property
+    def max_latency(self) -> Optional[int]:
+        return self._max_latency
+
+
+class SelfPausingChecker(FixedResultChecker):
+    """Stops its own target while the check is in flight."""
+
+    def __init__(self, daemon_ref: list[MonitoringDaemon]) -> None:
+        super().__init__([make_result(name="host-a", status="DOWN")])
+        self._daemon_ref = daemon_ref
+
+    async def check(self) -> CheckResult:
+        await self._daemon_ref[0].pause_target("host-a")
+        return await super().check()
+
+
+async def test_paused_target_is_not_checked_until_resumed(state):
+    checker = CountingChecker([make_result(status="UP"), make_result(status="UP")])
+    daemon = _make_daemon([checker], [], state)
+    await daemon.pause_target("host-a")
+
+    await daemon._run_cycle()
+    assert checker.calls == 0
+    assert state.get_status("host-a") is None
+
+    daemon.resume_target("host-a")
+    await daemon._run_cycle()
+    assert checker.calls == 1
+    assert state.get_status("host-a").current_status == "UP"
+
+
+async def test_pause_closes_dashboard_browser(state):
+    checker = CloseRecordingDashboardChecker()
+    daemon = _make_daemon([checker], [], state)
+    await daemon.pause_target("panel")
+    assert checker.closed
+    assert daemon.has_target("panel")
+
+
+async def test_target_paused_mid_check_records_nothing(state):
+    daemon_ref: list[MonitoringDaemon] = []
+    channel = RecordingChannel()
+    daemon = _make_daemon([SelfPausingChecker(daemon_ref)], [channel], state, retries=2)
+    daemon_ref.append(daemon)
+    await daemon._run_cycle()
+    assert state.get_status("host-a") is None
+    assert state.get_attempts("host-a") == []
+    assert channel.sent_alerts == []
+
+
+def test_daemon_loads_paused_targets_at_startup(minimal_config, state):
+    state.add_target(PingTarget(name="db-host", host="10.0.0.1"))
+    state.set_target_paused("db-host", True)
+    daemon = MonitoringDaemon(config=minimal_config, state=state)
+    assert daemon.has_target("db-host")
+    assert daemon._paused == {"db-host"}
+
+
+async def test_network_guard_ignores_paused_targets(state):
+    checkers = [_site("a", "UP", "DOWN"), _site("b", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+    await daemon._run_cycle()  # both UP
+    await daemon.pause_target("b")
+    await daemon._run_cycle()  # only "a" runs, and one DOWN isn't "all targets failed"
+    assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [("a", "UP_TO_DOWN")]
+
+
+async def test_stopping_every_target_does_not_report_network_restored(state):
+    channel = RecordingChannel()
+    daemon = _make_daemon([_site("a")], [channel], state)
+    daemon._network_down = True
+    await daemon.pause_target("a")
+    await daemon._run_cycle()
+    assert channel.sent_alerts == []
+    assert daemon._network_down
+
+
+async def test_removed_target_is_no_longer_paused(state):
+    daemon = _make_daemon([_site("a")], [], state)
+    await daemon.pause_target("a")
+    await daemon.remove_target("a")
+    assert daemon._paused == set()
+
+
+async def test_replace_target_swaps_checker_and_closes_old_browser(minimal_config, state):
+    old = CloseRecordingDashboardChecker()
+    daemon = _make_daemon([old], [], state)
+    await daemon.replace_target("panel", PingTarget(name="renamed", host="10.0.0.1"))
+    assert old.closed
+    assert not daemon.has_target("panel")
+    assert daemon.has_target("renamed")
+
+
+async def test_replace_target_keeps_it_paused_under_new_name(state):
+    daemon = _make_daemon([_site("a")], [], state)
+    await daemon.pause_target("a")
+    await daemon.replace_target("a", PingTarget(name="b", host="10.0.0.1"))
+    assert daemon._paused == {"b"}
+
+
+async def test_max_latency_exceeded_is_down_after_retries_and_alerts(state):
+    checker = SlowChecker([10, 500, 500], max_latency=100)
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [channel], state, retries=1)
+
+    await daemon._run_cycle()  # 10 ms: UP
+    await daemon._run_cycle()  # 500 ms twice: DOWN
+
+    assert checker.calls == 3
+    status = state.get_status("host-a")
+    assert status.current_status == "DOWN"
+    assert status.latency_ms == 500
+    assert [a.transition for a in channel.sent_alerts] == ["UP_TO_DOWN"]
+    assert "exceeds limit 100 ms" in channel.sent_alerts[0].message
+
+
+async def test_max_latency_blip_recovers_on_retry(state):
+    checker = SlowChecker([500, 10], max_latency=100)
+    daemon = _make_daemon([checker], [], state, retries=1)
+    await daemon._run_cycle()
+    assert state.get_status("host-a").current_status == "UP"
+    assert [a["status"] for a in state.get_attempts("host-a")] == ["DOWN", "UP"]
+
+
+async def test_no_max_latency_means_no_limit(state):
+    daemon = _make_daemon([SlowChecker([99999], max_latency=None)], [], state)
+    await daemon._run_cycle()
+    assert state.get_status("host-a").current_status == "UP"
+
+
+async def test_check_once_applies_max_latency(state):
+    daemon = _make_daemon([], [], state)
+    daemon._make_checker = lambda target: SlowChecker([500], max_latency=100)
+    result = await daemon.check_once(PingTarget(name="host-a", host="10.0.0.1"))
+    assert result.status == "DOWN"
+    assert result.error_message == "Latency 500 ms exceeds limit 100 ms"
+
+
+async def test_all_down_with_a_stopped_target_is_real_when_monitor_is_online(state):
+    """The stopped target may have been the one up, so "all failed" can't blame the network."""
+    checkers = [_site("a", "UP", "DOWN"), _site("b", "UP", "DOWN"), _site("c", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+    await daemon._run_cycle()
+    await daemon.pause_target("c")
+    await daemon._run_cycle()
+    assert sorted(a.target_name for a in channel.sent_alerts) == ["a", "b"]
+    assert state.get_status("a").current_status == "DOWN"
+
+
+async def test_all_down_with_a_stopped_target_and_monitor_offline_is_network(state):
+    checkers = [_site("a", "UP", "DOWN"), _site("b", "UP", "DOWN"), _site("c", "UP")]
+    channel = RecordingChannel()
+    daemon = _make_daemon(checkers, [channel], state)
+    await daemon._run_cycle()
+    await daemon.pause_target("c")
+    daemon._connectivity.online = False
+    await daemon._run_cycle()
+    assert [a.target_name for a in channel.sent_alerts] == ["Monitor network"]
+    assert state.get_status("a").current_status == "UP"
+
+
+class EditDuringOnlineProbe(FakeConnectivity):
+    """Runs a web UI action at the moment the cycle awaits the connectivity probe."""
+
+    def __init__(self, action) -> None:
+        super().__init__()
+        self._action = action
+
+    async def is_online(self) -> bool:
+        await self._action()
+        return True
+
+
+async def test_same_name_edit_after_check_discards_stale_result(state):
+    channel = RecordingChannel()
+    daemon = _make_daemon([_site("a", "UP", "DOWN")], [channel], state)
+    await daemon._run_cycle()
+
+    async def edit():
+        await daemon.replace_target("a", PingTarget(name="a", host="10.0.0.1"))
+
+    daemon._connectivity = EditDuringOnlineProbe(edit)
+    await daemon._run_cycle()
+
+    assert channel.sent_alerts == []
+    assert state.get_status("a").current_status == "UP"
+
+
+class QueuedDashboardChecker(CloseRecordingDashboardChecker):
+    def __init__(self) -> None:
+        super().__init__()
+        self.checks = 0
+
+    async def check(self) -> CheckResult:
+        self.checks += 1
+        return make_result(name="panel", target_type="dashboard", status="UP")
+
+
+async def test_queued_dashboard_check_does_not_log_in_after_stop(state):
+    checker = QueuedDashboardChecker()
+    daemon = _make_daemon([checker], [], state)
+    await _PLAYWRIGHT_SEMAPHORE.acquire()  # the check will queue here
+    try:
+        cycle = asyncio.create_task(daemon._run_cycle())
+        await asyncio.sleep(0)
+        await daemon.pause_target("panel")
+    finally:
+        _PLAYWRIGHT_SEMAPHORE.release()
+    await cycle
+    assert checker.checks == 0
+    assert state.get_attempts("panel") == []
+
+
+class DiesWhenBrowserCloses(CloseRecordingDashboardChecker):
+    """A login in flight: it fails as soon as its browser is closed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.released = asyncio.Event()
+
+    async def check(self) -> CheckResult:
+        self.started.set()
+        await self.released.wait()
+        raise RuntimeError("Target page, context or browser has been closed")
+
+
+async def test_stop_then_quick_resume_does_not_record_killed_login(state):
+    checker = DiesWhenBrowserCloses()
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [channel], state)
+    state.update(make_result(name="panel", target_type="dashboard", status="UP"))
+
+    cycle = asyncio.create_task(daemon._run_cycle())
+    await checker.started.wait()
+    await daemon.pause_target("panel")
+    daemon.resume_target("panel")
+    checker.released.set()
+    await cycle
+
+    assert checker.closed
+    assert daemon.has_target("panel")
+    assert channel.sent_alerts == []
+    assert state.get_status("panel").current_status == "UP"
+    assert state.get_attempts("panel") == []

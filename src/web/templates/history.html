@@ -40,7 +40,7 @@
     <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
       <p class="text-xs uppercase tracking-wider text-slate-400">Current status</p>
       {% if current %}
-        <p class="text-xl font-semibold mt-2 {{ 'text-emerald-400' if current.current_status == 'UP' else 'text-red-400' }}">{{ current.current_status }}</p>
+        <p class="text-xl font-semibold mt-2 {{ 'text-slate-400' if current.paused else 'text-emerald-400' if current.current_status == 'UP' else 'text-red-400' }}">{{ 'STOPPED' if current.paused else current.current_status }}</p>
       {% else %}
         <p class="text-xl font-semibold text-slate-400 mt-2">Unknown</p>
       {% endif %}

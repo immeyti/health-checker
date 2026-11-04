@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import platform
 import re
 import time
@@ -20,7 +21,8 @@ _RTT_PATTERNS = [
     re.compile(r"Average\s*=\s*([\d.]+)ms"),        # Windows: Average = 1ms
 ]
 
-_TIMEOUT_SECONDS = 5
+# Extra time for the ping process to exit on its own before it is abandoned
+_EXIT_GRACE_SECONDS = 2
 
 
 class PingChecker(BaseChecker):
@@ -32,6 +34,10 @@ class PingChecker(BaseChecker):
         return self._target.name
 
     @property
+    def max_latency(self):
+        return self._target.max_latency
+
+    @property
     def target_type(self):
         return "ping"
 
@@ -40,7 +46,7 @@ class PingChecker(BaseChecker):
         checked_at = datetime.now(timezone.utc)
         try:
             stdout = await asyncio.wait_for(
-                self._run_ping(), timeout=_TIMEOUT_SECONDS
+                self._run_ping(), timeout=self._target.timeout / 1000.0 + _EXIT_GRACE_SECONDS
             )
             elapsed_ms = (time.monotonic() - start) * 1000
             latency = self._parse_latency(stdout) or elapsed_ms
@@ -72,13 +78,8 @@ class PingChecker(BaseChecker):
             )
 
     async def _run_ping(self) -> str:
-        if platform.system() == "Windows":
-            args = ["ping", "-n", "1", "-w", "3000", self._target.host]
-        else:
-            args = ["ping", "-c", "1", "-W", "3", self._target.host]
-
         proc = await asyncio.create_subprocess_exec(
-            *args,
+            *self._ping_args(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -88,6 +89,13 @@ class PingChecker(BaseChecker):
         if proc.returncode != 0:
             raise RuntimeError(f"ping exited with code {proc.returncode}")
         return stdout
+
+    def _ping_args(self) -> list[str]:
+        timeout = self._target.timeout
+        if platform.system() == "Windows":
+            return ["ping", "-n", "1", "-w", str(timeout), self._target.host]
+        # Linux -W takes whole seconds
+        return ["ping", "-c", "1", "-W", str(max(1, math.ceil(timeout / 1000))), self._target.host]
 
     def _parse_latency(self, stdout: str) -> Optional[float]:
         for pattern in _RTT_PATTERNS:

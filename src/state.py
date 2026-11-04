@@ -89,11 +89,32 @@ CREATE TABLE IF NOT EXISTS targets (
     name        TEXT PRIMARY KEY,
     target_type TEXT NOT NULL,
     config      TEXT NOT NULL,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    paused      INTEGER NOT NULL DEFAULT 0
 );
 """
 
 _TARGET_TYPES = {"ping": PingTarget, "tcp": TcpTarget, "dashboard": DashboardTarget, "http": HttpTarget}
+
+
+def target_type(target: Target) -> str:
+    return next(k for k, cls in _TARGET_TYPES.items() if isinstance(target, cls))
+
+
+def _target_config(target: Target) -> str:
+    """JSON stored in targets.config, with a dashboard password encrypted."""
+    cfg = dataclasses.asdict(target)
+    if isinstance(target, DashboardTarget):
+        cfg["password"] = encrypt(cfg["password"])
+    return json.dumps(cfg)
+
+
+def _row_to_target(row: sqlite3.Row) -> Target:
+    cfg = json.loads(row["config"])
+    if row["target_type"] == "dashboard":
+        cfg["password"] = decrypt(cfg["password"])
+        cfg["success_indicator"] = SuccessIndicator(**cfg["success_indicator"])
+    return _TARGET_TYPES[row["target_type"]](**cfg)
 
 
 def _now_iso() -> str:
@@ -129,6 +150,7 @@ class StateTracker:
             ("check_logs", "screenshot_path", "TEXT"),
             ("target_states", "screenshot_path", "TEXT"),
             ("check_attempts", "network_issue", "TEXT"),
+            ("targets", "paused", "INTEGER NOT NULL DEFAULT 0"),
         ]
         for table, column, definition in migrations:
             try:
@@ -334,28 +356,54 @@ class StateTracker:
     # ------------------------------------------------------------------
 
     def add_target(self, target: Target) -> None:
-        target_type = next(k for k, cls in _TARGET_TYPES.items() if isinstance(target, cls))
-        cfg = dataclasses.asdict(target)
-        if target_type == "dashboard":
-            cfg["password"] = encrypt(cfg["password"])
         with self._conn:
             self._conn.execute(
                 "INSERT INTO targets (name, target_type, config, created_at) VALUES (?, ?, ?, ?)",
-                (target.name, target_type, json.dumps(cfg), _now_iso()),
+                (target.name, target_type(target), _target_config(target), _now_iso()),
             )
 
     def get_targets(self) -> list[Target]:
         rows = self._conn.execute(
             "SELECT target_type, config FROM targets ORDER BY name"
         ).fetchall()
-        targets: list[Target] = []
-        for r in rows:
-            cfg = json.loads(r["config"])
-            if r["target_type"] == "dashboard":
-                cfg["password"] = decrypt(cfg["password"])
-                cfg["success_indicator"] = SuccessIndicator(**cfg["success_indicator"])
-            targets.append(_TARGET_TYPES[r["target_type"]](**cfg))
-        return targets
+        return [_row_to_target(r) for r in rows]
+
+    def get_target(self, name: str) -> Optional[Target]:
+        row = self._conn.execute(
+            "SELECT target_type, config FROM targets WHERE name = ?", (name,)
+        ).fetchone()
+        return _row_to_target(row) if row else None
+
+    def update_target(self, old_name: str, target: Target) -> bool:
+        """Change a UI-added target; a new name takes its state and history along. False if it isn't one."""
+        new_name = target.name
+        with self._conn:
+            updated = self._conn.execute(
+                "UPDATE targets SET name = ?, config = ? WHERE name = ?",
+                (new_name, _target_config(target), old_name),
+            ).rowcount
+            if updated and new_name != old_name:
+                # Rows left by an earlier target of this name would block the primary key
+                # and mix its results into this target's uptime
+                self._conn.execute("DELETE FROM target_states WHERE name = ?", (new_name,))
+                self._conn.execute("DELETE FROM check_logs WHERE target_name = ?", (new_name,))
+                self._conn.execute("DELETE FROM check_attempts WHERE target_name = ?", (new_name,))
+                self._conn.execute("UPDATE target_states SET name = ? WHERE name = ?", (new_name, old_name))
+                self._conn.execute("UPDATE check_logs SET target_name = ? WHERE target_name = ?", (new_name, old_name))
+                self._conn.execute("UPDATE check_attempts SET target_name = ? WHERE target_name = ?", (new_name, old_name))
+        return bool(updated)
+
+    def set_target_paused(self, name: str, paused: bool) -> bool:
+        with self._conn:
+            return bool(
+                self._conn.execute(
+                    "UPDATE targets SET paused = ? WHERE name = ?", (int(paused), name)
+                ).rowcount
+            )
+
+    def get_paused_targets(self) -> set[str]:
+        rows = self._conn.execute("SELECT name FROM targets WHERE paused = 1").fetchall()
+        return {r["name"] for r in rows}
 
     def delete_target(self, name: str) -> bool:
         """Remove a UI-added target with its state and history. False if it isn't one."""
@@ -443,6 +491,7 @@ class StateTracker:
             consecutive_failures=row["consecutive_failures"],
             first_seen=_parse_dt(row["first_seen"]),
             screenshot_path=row["screenshot_path"],
+            paused=row["name"] in self.get_paused_targets(),
         )
         ts.uptime_pct = self._calc_uptime(row["name"], retention_days)
         ts.avg_latency_ms = self._calc_avg_latency(row["name"], retention_days)

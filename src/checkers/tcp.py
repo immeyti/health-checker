@@ -21,6 +21,10 @@ class TCPChecker(BaseChecker):
         return self._target.name
 
     @property
+    def max_latency(self):
+        return self._target.max_latency
+
+    @property
     def target_type(self):
         return "tcp"
 

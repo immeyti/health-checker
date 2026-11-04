@@ -16,6 +16,8 @@ class ConfigError(Exception):
 class PingTarget:
     name: str
     host: str
+    timeout: int = 3000  # ms
+    max_latency: Optional[int] = None  # ms; slower successful checks count as DOWN
 
 
 @dataclass
@@ -24,6 +26,7 @@ class TcpTarget:
     host: str
     port: int
     timeout: int = 5000  # ms
+    max_latency: Optional[int] = None  # ms; slower successful checks count as DOWN
 
 
 @dataclass
@@ -40,6 +43,7 @@ class DashboardTarget:
     password: str
     success_indicator: SuccessIndicator
     timeout: int = 15000  # ms
+    max_latency: Optional[int] = None  # ms; slower successful checks count as DOWN
 
 
 @dataclass
@@ -49,6 +53,7 @@ class HttpTarget:
     expected_text: str = ""   # DOWN if missing from the response body
     forbidden_text: str = ""  # DOWN if present in the response body
     timeout: int = 10000  # ms
+    max_latency: Optional[int] = None  # ms; slower successful checks count as DOWN
 
 
 Target = PingTarget | TcpTarget | DashboardTarget | HttpTarget
@@ -152,7 +157,12 @@ def load_config(path: str) -> AppConfig:
     targets_raw = raw.get("targets", {})
 
     ping_targets = [
-        PingTarget(name=t["name"], host=t["host"])
+        PingTarget(
+            name=t["name"],
+            host=t["host"],
+            timeout=t.get("timeout", 3000),
+            max_latency=t.get("max_latency"),
+        )
         for t in targets_raw.get("ping", [])
     ]
 
@@ -162,6 +172,7 @@ def load_config(path: str) -> AppConfig:
             host=t["host"],
             port=int(t["port"]),
             timeout=t.get("timeout", 5000),
+            max_latency=t.get("max_latency"),
         )
         for t in targets_raw.get("tcp", [])
     ]
@@ -173,6 +184,7 @@ def load_config(path: str) -> AppConfig:
             expected_text=t.get("expected_text", ""),
             forbidden_text=t.get("forbidden_text", ""),
             timeout=t.get("timeout", 10000),
+            max_latency=t.get("max_latency"),
         )
         for t in targets_raw.get("http", [])
     ]
@@ -192,6 +204,7 @@ def load_config(path: str) -> AppConfig:
                 password=t["password"],
                 success_indicator=si,
                 timeout=t.get("timeout", 15000),
+                max_latency=t.get("max_latency"),
             )
         )
 

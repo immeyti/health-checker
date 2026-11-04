@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
 
 from .config import DashboardTarget, HttpTarget, PingTarget, SuccessIndicator, TcpTarget
 
@@ -34,6 +34,7 @@ class TargetStatus(BaseModel):
     avg_latency_ms: Optional[float] = None
     timeline: list[str] = []  # buckets for the selected period: "UP", "DOWN", or "UNKNOWN"
     screenshot_path: Optional[str] = None
+    paused: bool = False
 
 
 class Alert(BaseModel):
@@ -60,35 +61,49 @@ class CheckLog(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# A "/" can't be addressed by the /api/targets/{name} routes
+TargetName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"^[^/]+$")]
+# Results are recorded after the whole cycle, so one long timeout delays every target's alerts
+TimeoutMs = Annotated[int, Field(gt=0, le=120_000)]
+# A blank form field means no limit
+MaxLatency = Annotated[Optional[Annotated[int, Field(gt=0)]], BeforeValidator(lambda v: None if v == "" else v)]
+
+
 class PingTargetIn(BaseModel):
     type: Literal["ping"]
-    name: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    name: TargetName
+    host: str = Field(pattern=r"^[^-\s]\S*$")  # a leading "-" would be read as a ping option
+    timeout: TimeoutMs = 3000
+    max_latency: MaxLatency = None
 
     def to_target(self) -> PingTarget:
-        return PingTarget(name=self.name, host=self.host)
+        return PingTarget(name=self.name, host=self.host, timeout=self.timeout, max_latency=self.max_latency)
 
 
 class TcpTargetIn(BaseModel):
     type: Literal["tcp"]
-    name: str = Field(min_length=1)
+    name: TargetName
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
-    timeout: int = Field(default=5000, gt=0)
+    timeout: TimeoutMs = 5000
+    max_latency: MaxLatency = None
 
     def to_target(self) -> TcpTarget:
-        return TcpTarget(name=self.name, host=self.host, port=self.port, timeout=self.timeout)
+        return TcpTarget(
+            name=self.name, host=self.host, port=self.port, timeout=self.timeout, max_latency=self.max_latency
+        )
 
 
 class DashboardTargetIn(BaseModel):
     type: Literal["dashboard"]
-    name: str = Field(min_length=1)
-    url: str = Field(min_length=1)
+    name: TargetName
+    url: str = Field(pattern=r"^https?://")  # the browser would open file:// too
     username: str = Field(min_length=1)
-    password: str = Field(min_length=1)
+    password: str = ""  # blank keeps the stored password when editing; routes enforce it otherwise
     indicator_type: Literal["url_contains", "element_exists", "text_contains"]
     indicator_value: str = Field(min_length=1)
-    timeout: int = Field(default=15000, gt=0)
+    timeout: TimeoutMs = 15000
+    max_latency: MaxLatency = None
 
     def to_target(self) -> DashboardTarget:
         return DashboardTarget(
@@ -98,16 +113,18 @@ class DashboardTargetIn(BaseModel):
             password=self.password,
             success_indicator=SuccessIndicator(type=self.indicator_type, value=self.indicator_value),
             timeout=self.timeout,
+            max_latency=self.max_latency,
         )
 
 
 class HttpTargetIn(BaseModel):
     type: Literal["http"]
-    name: str = Field(min_length=1)
+    name: TargetName
     url: str = Field(pattern=r"^https?://")
     expected_text: str = ""
     forbidden_text: str = ""
-    timeout: int = Field(default=10000, gt=0)
+    timeout: TimeoutMs = 10000
+    max_latency: MaxLatency = None
 
     def to_target(self) -> HttpTarget:
         return HttpTarget(
@@ -116,6 +133,7 @@ class HttpTargetIn(BaseModel):
             expected_text=self.expected_text,
             forbidden_text=self.forbidden_text,
             timeout=self.timeout,
+            max_latency=self.max_latency,
         )
 
 

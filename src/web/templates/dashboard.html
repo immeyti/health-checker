@@ -41,8 +41,9 @@
 
   {# ── Compute summary counts ──────────────────────────────────────── #}
   {% set total      = statuses | length %}
-  {% set up_count   = statuses | selectattr("current_status", "equalto", "UP")   | list | length %}
-  {% set down_count = statuses | selectattr("current_status", "equalto", "DOWN") | list | length %}
+  {% set active     = statuses | rejectattr("paused") | list %}
+  {% set up_count   = active | selectattr("current_status", "equalto", "UP")   | list | length %}
+  {% set down_count = active | selectattr("current_status", "equalto", "DOWN") | list | length %}
 
   {# ── Summary cards ───────────────────────────────────────────────── #}
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
@@ -123,7 +124,11 @@
 
           {# Status badge #}
           <td class="px-4 py-4">
-            {% if s.current_status == "UP" %}
+            {% if s.paused %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-slate-800 text-slate-400 ring-1 ring-slate-700/50">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Stopped
+              </span>
+            {% elif s.current_status == "UP" %}
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-emerald-950 text-emerald-400 ring-1 ring-emerald-800/50">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> UP
               </span>
@@ -136,7 +141,7 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> {{ s.current_status }}
               </span>
             {% endif %}
-            {% if s.consecutive_failures > 0 %}
+            {% if s.consecutive_failures > 0 and not s.paused %}
               <p class="text-xs text-red-400/80 mt-1">
                 {{ s.consecutive_failures }} failure{{ "s" if s.consecutive_failures != 1 }}
               </p>

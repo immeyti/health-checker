@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -183,3 +185,108 @@ def test_mark_network_issue_flags_whole_cycle(state):
     assert [a["network_issue"] for a in state.get_attempts("host-a")] == [
         "all_targets_failed", "all_targets_failed", None,
     ]
+
+
+# ---------------------------------------------------------------------------
+# Editing and stopping UI targets
+# ---------------------------------------------------------------------------
+
+
+def _dashboard(name="panel", password="old-secret"):
+    return DashboardTarget(
+        name=name, url="https://panel.example.com/login", username="admin", password=password,
+        success_indicator=SuccessIndicator(type="url_contains", value="/home"),
+    )
+
+
+def test_update_target_changes_config_and_keeps_history(state):
+    state.add_target(PingTarget(name="srv", host="10.0.0.1"))
+    state.update(make_result(name="srv", status="UP"))
+    assert state.update_target("srv", PingTarget(name="srv", host="10.0.0.2", timeout=1000, max_latency=50))
+    assert state.get_target("srv") == PingTarget(name="srv", host="10.0.0.2", timeout=1000, max_latency=50)
+    assert len(state.get_history("srv")) == 1
+
+
+def test_update_target_rename_moves_state_and_history(state):
+    state.add_target(PingTarget(name="old", host="10.0.0.1"))
+    state.update(make_result(name="old", status="UP"))
+    state.record_attempt(make_result(name="old", status="UP"), "c1", 1)
+    state.set_target_paused("old", True)
+
+    assert state.update_target("old", PingTarget(name="new", host="10.0.0.1"))
+
+    assert state.get_target("old") is None
+    assert state.get_status("old") is None
+    assert state.get_status("new").current_status == "UP"
+    assert len(state.get_history("new")) == 1
+    assert len(state.get_attempts("new")) == 1
+    assert state.get_paused_targets() == {"new"}
+
+
+def test_update_target_rename_replaces_leftover_state_row(state):
+    state.add_target(PingTarget(name="old", host="10.0.0.1"))
+    state.update(make_result(name="old", status="UP"))
+    state.update(make_result(name="removed-from-yaml", status="DOWN"))
+    assert state.update_target("old", PingTarget(name="removed-from-yaml", host="10.0.0.1"))
+    assert state.get_status("removed-from-yaml").current_status == "UP"
+    # The earlier target's results don't count toward this one
+    assert [log.status for log in state.get_history("removed-from-yaml")] == ["UP"]
+
+
+def test_update_target_encrypts_password(state):
+    state.add_target(_dashboard())
+    state.update_target("panel", _dashboard(password="new-secret"))
+    row = state._conn.execute("SELECT config FROM targets").fetchone()
+    assert "new-secret" not in row["config"]
+    assert state.get_target("panel").password == "new-secret"
+
+
+def test_update_target_unknown_returns_false(state):
+    assert not state.update_target("nope", PingTarget(name="nope", host="10.0.0.1"))
+
+
+def test_paused_targets_survive_reopening_the_database(tmp_path):
+    db = str(tmp_path / "monitor.db")
+    first = StateTracker(db_path=db)
+    first.add_target(PingTarget(name="srv", host="10.0.0.1"))
+    assert first.set_target_paused("srv", True)
+    first.close()
+
+    second = StateTracker(db_path=db)
+    assert second.get_paused_targets() == {"srv"}
+    assert second.set_target_paused("srv", False)
+    assert second.get_paused_targets() == set()
+    second.close()
+
+
+def test_set_target_paused_unknown_returns_false(state):
+    assert not state.set_target_paused("nope", True)
+
+
+def test_status_reports_paused(state):
+    state.add_target(PingTarget(name="srv", host="10.0.0.1"))
+    state.update(make_result(name="srv", status="UP"))
+    assert not state.get_status("srv").paused
+    state.set_target_paused("srv", True)
+    assert state.get_status("srv").paused
+    assert state.get_all_statuses()[0].paused
+
+
+def test_migration_adds_paused_and_old_rows_load_with_defaults(tmp_path):
+    db = str(tmp_path / "monitor.db")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE targets (name TEXT PRIMARY KEY, target_type TEXT NOT NULL, "
+        "config TEXT NOT NULL, created_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO targets VALUES ('srv', 'ping', ?, '2026-01-01T00:00:00+00:00')",
+        (json.dumps({"name": "srv", "host": "10.0.0.1"}),),
+    )
+    conn.commit()
+    conn.close()
+
+    state = StateTracker(db_path=db)
+    assert state.get_target("srv") == PingTarget(name="srv", host="10.0.0.1", timeout=3000, max_latency=None)
+    assert state.get_paused_targets() == set()
+    state.close()

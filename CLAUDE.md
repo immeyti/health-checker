@@ -56,11 +56,11 @@ src/
 
   web/
     app.py         # FastAPI factory — mounts /static, /screenshots, /videos static dirs
-    routes.py      # GET /, /api/status, /api/history/{name}; GET /targets, POST /api/targets[/test], DELETE /api/targets/{name}; GET /channels, POST /api/channels, DELETE /api/channels/{name}
+    routes.py      # GET /, /api/status, /api/history/{name}; GET /targets, POST /api/targets[/test], GET|PUT|DELETE /api/targets/{name}, PUT /api/targets/{name}/pause|resume; GET /channels, POST /api/channels, DELETE /api/channels/{name}
     templates/
       base.html
       dashboard.html   # status table with 24h timeline + video thumbnail + lightbox
-      targets.html     # add / test / delete targets (no auto-refresh)
+      targets.html     # add / test / edit / stop / delete targets (no auto-refresh)
     static/
       input.css    # Tailwind v4 entry point (@import "tailwindcss")
       tailwind.css # pre-built minified CSS — commit this, rebuild when templates change
@@ -120,6 +120,10 @@ alerts:
 - **Monitor network guard** — after retries, if every target (2+) is DOWN in the same cycle, or a target is DOWN and none of `connectivity_hosts` (default `1.1.1.1:443`, `8.8.8.8:443`) is reachable, the DOWN results are not recorded and a single "Monitor network" alert is sent instead (plus one on recovery). Attempts are still kept in `check_attempts`, flagged with `network_issue`
 - **Provider evidence** — each attempt's diagnostics hold `source_ip` (public IP from `public_ip_url`, cached 10 min) and, for HTTP, `server_ip` (or `resolved_ips` on failure); the CSV exports take `since`/`until` (naive = Tehran time) with no row limit
 - `consecutive_failures` column available for future "alert after N failures" logic
+- **Edit and stop (UI targets only)** — editing swaps the checker in place; a rename moves `target_states`, `check_logs` and `check_attempts` to the new name; the type can't change. Stopped targets (`targets.paused`) are skipped by the cycle and the network guard and shown as Stopped. A check in flight when its target is edited, stopped or deleted is discarded (`MonitoringDaemon._is_active`)
+- **Input limits** — target names can't contain `/` (unreachable by `/api/targets/{name}`), timeouts are capped at 120000 ms (results wait for the whole cycle), ping hosts can't start with `-`, dashboard URLs must be http(s). Pause and resume are PUT, because a bodyless POST could be sent by any website (CSRF)
+- **Dashboard password on edit** — never sent to the browser; blank keeps the stored one, but changing the URL requires re-entering it so it can't be sent to a new address (`routes._fill_password`)
+- **Latency limit** — optional `max_latency` (ms) on any target: `BaseChecker.run()` turns a successful but slower result into DOWN, which then follows the normal retry, guard and alert path. The daemon and Test call `run()`, not `check()`. Dashboard latency includes `slow_mo` and `STEP_PAUSE`, so its limit must be high
 
 ### Dashboard checker (`checkers/dashboard.py`)
 - Reuses a long-lived browser process per checker; fresh context per check (clean cookies)
@@ -157,7 +161,7 @@ check_logs: id, target_name, target_type, status, latency_ms,
 alert_channels: name, channel_type, config (JSON), created_at
 
 -- targets added from the web UI (config.yaml targets are not stored here)
-targets: name, target_type, config (JSON; dashboard password Fernet-encrypted), created_at
+targets: name, target_type, config (JSON; dashboard password Fernet-encrypted), created_at, paused
 ```
 
 Schema migrations are handled in `StateTracker._migrate_db()` via `ALTER TABLE ... ADD COLUMN` (safe to run on every startup — catches `OperationalError` if column exists).
@@ -198,13 +202,13 @@ pytest -k "transition"
 
 | File | What it covers |
 |---|---|
-| `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge, UI targets (17 cases) |
-| `tests/test_ping.py` | PingChecker — real subprocess ping (1 fast + 1 slow) |
+| `tests/test_state.py` | StateTracker — transitions, uptime, timeline, purge, UI targets, edit, rename, paused (29 cases) |
+| `tests/test_ping.py` | PingChecker — real subprocess ping, timeout args, latency limit (5 fast + 1 slow) |
 | `tests/test_http.py` | HTTPChecker — status codes, redirects, timeout, body text (respx) (8 cases) |
-| `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (2 cases) |
+| `tests/test_dashboard_checker.py` | DashboardChecker — subclass mocking, no Playwright (6 cases) |
 | `tests/test_channels.py` | SMSChannel, TelegramChannel (incl. forum topic) + build_channel (7 cases) |
-| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove, check_once, retries, monitor network guard (15 cases) |
-| `tests/test_web.py` | FastAPI routes via TestClient, incl. target management (24 cases) |
+| `tests/test_daemon.py` | MonitoringDaemon — alert dispatch, broken channel, runtime add/remove/replace, stop, check_once, retries, monitor network guard, latency limit (36 cases) |
+| `tests/test_web.py` | FastAPI routes via TestClient, incl. target add, edit, stop, input limits (98 cases) |
 
 ### Testing rules (from CLAUDE.md)
 - Use real SQLite (`:memory:`) — never mock the DB

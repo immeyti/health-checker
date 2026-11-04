@@ -18,7 +18,8 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 - **REST API** — `/api/status`, `/api/history/{target}` for external consumers
 - **SMS alerts** on UP↔DOWN transitions via [Kavenegar](https://kavenegar.com) or [Twilio](https://twilio.com)
 - **Telegram alerts** via a bot to one or more chat IDs
-- **Manage targets from the web UI** — add, test and delete targets at `/targets` without a restart
+- **Manage targets from the web UI** — add, test, edit, stop and delete targets at `/targets` without a restart
+- **Latency limit** — optionally mark a target DOWN when a successful check is slower than `max_latency`
 - **HTTP Basic Auth** on the web UI (disabled when `MONITOR_USERNAME`/`MONITOR_PASSWORD` are unset)
 - **Docker-first** — single `docker compose up -d` to run everything
 
@@ -140,7 +141,7 @@ Open `/channels` to add Telegram or Bale channels (bot token + chat IDs, plus an
 
 ### Managing targets from the web UI
 
-Open `/targets` to add an HTTP, ping, TCP or dashboard target, run a one-off **Test** before saving, or delete targets added there. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
+Open `/targets` to add an HTTP, ping, TCP or dashboard target, run a one-off **Test** before saving, or edit, stop, resume and delete targets added there. Renaming a target keeps its history; its type can't change. A stopped target isn't checked, stays stopped across restarts, and doesn't count toward uptime. Each target has an editable timeout and an optional **Max latency**: a successful check slower than that counts as DOWN. UI-added targets are stored in SQLite and start being checked on the next cycle — no restart needed. Targets defined in `config.yaml` can only be changed in that file.
 
 Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (required in `.env`). If the key changes or is lost, those passwords can't be decrypted and the targets must be re-added.
 
@@ -158,6 +159,10 @@ Dashboard passwords entered in the UI are encrypted with `MONITOR_SECRET_KEY` (r
 | `GET /api/attempts/{name}.csv` | Download a per-attempt diagnostic CSV, including failed retries (`?since=2026-10-22T10:00&until=2026-10-22T12:00`; times without a timezone are Tehran time; no row limit) |
 | `POST /api/targets` | Add a target (JSON body with `type`: `http` / `ping` / `tcp` / `dashboard`) |
 | `POST /api/targets/test` | Run one check for a target without saving it |
+| `GET /api/targets/{name}` | A UI-added target's settings, without its password |
+| `PUT /api/targets/{name}` | Edit a UI-added target (blank dashboard password keeps the current one) |
+| `PUT /api/targets/{name}/pause` | Stop checking a UI-added target |
+| `PUT /api/targets/{name}/resume` | Start checking it again |
 | `DELETE /api/targets/{name}` | Delete a target added from the UI |
 
 All endpoints require HTTP Basic Auth with the same credentials as the web UI.

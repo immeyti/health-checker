@@ -59,10 +59,19 @@ class DashboardChecker(BaseChecker):
         self._videos_dir = Path(screenshots_dir).parent / "videos"
         self._browser: Optional[Browser] = None
         self._playwright = None
+        self._closed = False
 
     @property
     def name(self) -> str:
         return self._target.name
+
+    @property
+    def target(self) -> DashboardTarget:
+        return self._target
+
+    @property
+    def max_latency(self):
+        return self._target.max_latency
 
     @property
     def target_type(self):
@@ -168,14 +177,18 @@ class DashboardChecker(BaseChecker):
                     tmp_video_path = await page.video.path()
                 except Exception:
                     pass
-            await context.close()
+            try:
+                await context.close()
+            except Exception:
+                pass  # browser closed by Stop or Edit mid-check; this attempt is discarded
 
         video_path = await self._handle_recording(success, tmp_video_path)
         return success, video_path, error_msg
 
     async def _handle_recording(self, success: bool, tmp_video_path: Optional[str]) -> Optional[str]:
         """Discard the video on success; keep and rename it on failure."""
-        if success:
+        # A check cut off by close() must not overwrite the last real failure's video
+        if success or self._closed:
             if tmp_video_path:
                 try:
                     Path(tmp_video_path).unlink(missing_ok=True)
@@ -255,6 +268,7 @@ class DashboardChecker(BaseChecker):
             self._browser = None
 
     async def close(self) -> None:
+        self._closed = True
         await self._close_browser()
         try:
             if self._playwright:
