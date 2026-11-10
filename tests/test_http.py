@@ -113,6 +113,22 @@ async def test_http_expected_text_present_up_missing_down():
 
 
 @respx.mock
+async def test_http_expected_text_matches_html_entities():
+    respx.get(URL).mock(return_value=httpx.Response(
+        200, text="<h1>Secure &amp; Easy Trading, Without Limits Secure Payment</h1>"
+    ))
+    result = await _checker(expected_text="Secure & Easy Trading, Without Limits Secure Payment").check()
+    assert result.status == "UP"
+
+
+@respx.mock
+async def test_http_forbidden_text_matches_html_entities():
+    respx.get(URL).mock(return_value=httpx.Response(200, text="<h1>Account &amp; Hosting Suspended</h1>"))
+    result = await _checker(forbidden_text="Account & Hosting Suspended").check()
+    assert result.status == "DOWN"
+
+
+@respx.mock
 async def test_http_forbidden_text_found_returns_down():
     respx.get(URL).mock(return_value=httpx.Response(200, text="Database error: connection lost"))
     result = await _checker(forbidden_text="Database error").check()

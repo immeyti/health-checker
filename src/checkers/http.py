@@ -5,6 +5,7 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
+from html import unescape
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -97,9 +98,10 @@ class HTTPChecker(BaseChecker):
             return "Hosting account suspended (redirected to cPanel suspended page)"
         if re.search(r"<title[^>]*>\s*Account Suspended\s*</title>", resp.text, re.IGNORECASE):
             return "Hosting account suspended"
-        if self._target.expected_text and self._target.expected_text not in resp.text:
+        page_text = unescape(resp.text)
+        if self._target.expected_text and unescape(self._target.expected_text) not in page_text:
             return f'Expected text "{self._target.expected_text}" not found'
-        if self._target.forbidden_text and self._target.forbidden_text in resp.text:
+        if self._target.forbidden_text and unescape(self._target.forbidden_text) in page_text:
             return f'Forbidden text "{self._target.forbidden_text}" found'
         return None
 
