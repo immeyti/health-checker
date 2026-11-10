@@ -40,7 +40,7 @@ class TargetStatus(BaseModel):
 class Alert(BaseModel):
     target_name: str
     target_type: str
-    transition: Literal["UP_TO_DOWN", "DOWN_TO_UP"]
+    transition: Literal["UP_TO_DOWN", "DOWN_TO_UP", "INITIAL_DOWN"]
     triggered_at: datetime
     message: str
 

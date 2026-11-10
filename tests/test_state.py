@@ -16,6 +16,14 @@ def test_first_check_no_alert(state):
     assert alert is None
 
 
+def test_first_check_down_alerts(state):
+    alert = state.update(make_result(status="DOWN", error_message="Account suspended"))
+    assert alert is not None
+    assert alert.transition == "INITIAL_DOWN"
+    assert "Account suspended" in alert.message
+    assert state.get_status("host-a").current_status == "DOWN"
+
+
 def test_first_check_state_created(state):
     state.update(make_result(name="srv", status="UP"))
     statuses = state.get_all_statuses()

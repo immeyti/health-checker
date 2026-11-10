@@ -244,7 +244,7 @@ class StateTracker:
             else:
                 consecutive_failures = 0
 
-            # Only alert on transition; never alert on very first check (row existed already)
+            # Alert on a change after the first recorded check.
             if previous_status != result.status:
                 transition = (
                     "UP_TO_DOWN" if result.status == "DOWN" else "DOWN_TO_UP"
@@ -264,9 +264,17 @@ class StateTracker:
                 )
                 logger.warning("Transition: %s", msg)
         else:
-            # First ever check — insert without alert
+            # First ever check: alert if the target is already down.
             if result.status == "DOWN":
                 consecutive_failures = 1
+                alert = Alert(
+                    target_name=result.target_name,
+                    target_type=result.target_type,
+                    transition="INITIAL_DOWN",
+                    triggered_at=result.checked_at,
+                    message=f"[INITIAL_DOWN] {result.target_name} ({result.target_type}) is DOWN on its first check"
+                    + (f" — {result.error_message}" if result.error_message else ""),
+                )
             logger.info(
                 "First check for %s → %s", result.target_name, result.status
             )

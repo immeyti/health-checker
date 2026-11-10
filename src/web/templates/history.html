@@ -18,7 +18,7 @@
   <form id="export-form" method="get" action="/api/attempts/{{ target_name | urlencode }}.csv"
         class="rounded-2xl border border-slate-800 bg-slate-900 p-5 mb-8">
     <h2 class="text-base font-semibold text-slate-100">Download for your hosting provider</h2>
-    <p class="text-xs text-slate-400 mt-1 mb-4">Pick the window in Tehran time; leave a field empty for all retained data. Rows with a <span class="font-mono">network_issue</span> value failed on the monitor's side — leave them out when reporting to the provider.</p>
+    <p class="text-xs text-slate-400 mt-1 mb-4">Pick the window in Tehran time; leave a field empty for all retained data. <span class="font-mono">monitor_offline</span> means the monitor could not reach its reference hosts. Older <span class="font-mono">all_targets_failed</span> rows were not verified against those hosts; review them before excluding them from a report.</p>
     <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
       <label class="flex flex-col gap-1 text-xs text-slate-400">From
         <input type="datetime-local" name="since"
@@ -129,7 +129,7 @@
                   <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ 'bg-emerald-950 text-emerald-300' if group.status == 'UP' else 'bg-red-950 text-red-300' }}">{{ group.status }}</span>
                   <time class="text-sm text-slate-200 font-mono" datetime="{{ group.attempts[0].checked_at }}">{{ (group.attempts[0].checked_at_dt | tehran).strftime('%Y-%m-%d %H:%M:%S') }}</time>
                   {% if group.recovered %}<span class="text-xs text-amber-300">Recovered on retry</span>{% endif %}
-                  {% if group.network_issue %}<span class="text-xs text-sky-300">Monitor network issue — not counted</span>{% endif %}
+                  {% if group.network_issue == 'monitor_offline' %}<span class="text-xs text-sky-300">Monitor network issue — not counted</span>{% elif group.network_issue %}<span class="text-xs text-amber-300">Older network classification — review</span>{% endif %}
                 </span>
                 <span class="text-xs text-slate-400 whitespace-nowrap">{{ group.attempts | length }} {{ 'attempt' if group.attempts | length == 1 else 'attempts' }} ▾</span>
               </summary>

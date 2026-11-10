@@ -37,11 +37,12 @@ class BaleChannel(BaseChannel):
     def _format_message(self, alert: Alert) -> str:
         if alert.target_type == "network":
             return self._format_network_alert(alert)
-        icon = "🔴" if alert.transition == "UP_TO_DOWN" else "🟢"
+        icon = "🟢" if alert.transition == "DOWN_TO_UP" else "🔴"
+        status = "DOWN (first check)" if alert.transition == "INITIAL_DOWN" else alert.transition.replace('_', ' → ')
         return (
             f"{icon} Monitor Alert\n"
             f"Target: {alert.target_name} ({alert.target_type})\n"
-            f"Status: {alert.transition.replace('_', ' → ')}\n"
+            f"Status: {status}\n"
             f"Time: {format_alert_time(alert.triggered_at)}"
         )
 

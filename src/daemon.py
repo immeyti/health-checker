@@ -143,11 +143,12 @@ class MonitoringDaemon:
 
         down_cycles = [cycle_id for _, cycle_id, result in outcomes if result.status == "DOWN"]
         reason = issue = None
-        # A stopped target could have been the one still up, so ask the reference hosts instead
-        if len(finished) >= 2 and len(down_cycles) == len(finished) and not self._paused:
-            reason = f"All {len(finished)} targets failed at the same time."
-            issue = "all_targets_failed"
-        elif down_cycles and not await self._connectivity.is_online():
+        # A successful target check is evidence against a total monitor outage.
+        if (
+            down_cycles
+            and not any(r.status == "UP" for _, r in finished)
+            and not await self._connectivity.is_online()
+        ):
             reason = "Reference hosts are unreachable from the monitor."
             issue = "monitor_offline"
 

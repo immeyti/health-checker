@@ -17,6 +17,7 @@ A self-hosted uptime monitor that checks servers (ICMP ping, TCP port) and web d
 - **Live web UI** — status table, 24-hour timeline, click-to-play video lightbox
 - **REST API** — `/api/status`, `/api/history/{target}` for external consumers
 - **SMS alerts** on UP↔DOWN transitions via [Kavenegar](https://kavenegar.com) or [Twilio](https://twilio.com)
+- **Initial DOWN alerts** when a newly monitored target fails its first completed check
 - **Telegram alerts** via a bot to one or more chat IDs
 - **Manage targets from the web UI** — add, test, edit, stop and delete targets at `/targets` without a restart
 - **Latency limit** — optionally mark a target DOWN when a successful check is slower than `max_latency`
@@ -176,9 +177,11 @@ incident CSV for existing final outcomes, including records from before this
 version was deployed. Download the attempt CSV for new per-attempt evidence.
 Each detailed-log row is one check attempt; attempts in the same cycle share a
 `cycle_id` and are numbered from 1.
-Rows with a `network_issue` value (`all_targets_failed` or `monitor_offline`)
-failed because of the monitor's own connection — leave them out of a report to
-the hosting provider.
+Rows with a `network_issue` value of `monitor_offline` failed while the
+monitor's reference hosts were unreachable. Older rows may also contain
+`all_targets_failed`; that label was assigned when every target failed in one
+cycle, without confirming the monitor's own connection. Review those older
+rows before leaving them out of a report to the hosting provider.
 The CSV records UTC time, outcome, error, duration, the monitor's public IP
 (`source_ip`), and for HTTP checks the server IP that answered (`server_ip`, or
 `resolved_ips` from DNS when the connection failed), the status code, response host, redirect count, exception type, and selected server request
@@ -256,8 +259,7 @@ src/
 
 ```bash
 pip install -r requirements-test.txt
-pytest -m "not slow"   # fast suite (~1s)
-pytest                  # full suite including real network tests
+pytest                  # full suite; failure paths are tested without external network assumptions
 ```
 
 ---

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -90,6 +91,12 @@ class HTTPChecker(BaseChecker):
         """Return the reason the response counts as DOWN, or None if it's healthy."""
         if resp.status_code >= 400:
             return f"HTTP {resp.status_code} {resp.reason_phrase}"
+        if 300 <= resp.status_code < 400:
+            return f"HTTP {resp.status_code} redirect did not reach a page"
+        if resp.url.path.rstrip("/").lower() == "/cgi-sys/suspendedpage.cgi":
+            return "Hosting account suspended (redirected to cPanel suspended page)"
+        if re.search(r"<title[^>]*>\s*Account Suspended\s*</title>", resp.text, re.IGNORECASE):
+            return "Hosting account suspended"
         if self._target.expected_text and self._target.expected_text not in resp.text:
             return f'Expected text "{self._target.expected_text}" not found'
         if self._target.forbidden_text and self._target.forbidden_text in resp.text:

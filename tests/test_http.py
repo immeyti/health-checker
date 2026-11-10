@@ -58,6 +58,33 @@ async def test_http_redirect_to_healthy_page_returns_up():
 
 
 @respx.mock
+async def test_http_redirect_without_destination_returns_down():
+    respx.get(URL).mock(return_value=httpx.Response(302))
+    result = await _checker().check()
+    assert result.status == "DOWN"
+    assert "redirect did not reach a page" in result.error_message
+
+
+@respx.mock
+async def test_http_redirect_to_suspended_page_returns_down():
+    suspended = "https://site.example.com/cgi-sys/suspendedpage.cgi"
+    respx.get(URL).mock(return_value=httpx.Response(302, headers={"Location": suspended}))
+    respx.get(suspended).mock(return_value=httpx.Response(200, text="<title>Account Suspended</title>"))
+    result = await _checker().check()
+    assert result.status == "DOWN"
+    assert "suspended" in result.error_message.lower()
+    assert result.diagnostics["http_status"] == 200
+    assert result.diagnostics["redirect_count"] == 1
+
+
+@respx.mock
+async def test_http_suspended_page_without_redirect_returns_down():
+    respx.get(URL).mock(return_value=httpx.Response(200, text="<title>Account Suspended</title>"))
+    result = await _checker().check()
+    assert result.status == "DOWN"
+
+
+@respx.mock
 async def test_http_timeout_returns_down():
     respx.get(URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
     result = await _checker(timeout=2000).check()

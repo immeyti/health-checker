@@ -16,13 +16,15 @@ async def test_ping_loopback_returns_up():
     assert result.latency_ms > 0
 
 
-@pytest.mark.slow
-async def test_ping_unreachable_returns_down():
-    """192.0.2.1 is RFC 5737 TEST-NET-1 — guaranteed non-routable. Takes ~5s."""
+async def test_ping_failure_returns_down(monkeypatch):
+    async def failed_ping():
+        raise RuntimeError("ping exited with code 1")
+
     checker = PingChecker(PingTarget(name="blackhole", host="192.0.2.1"))
+    monkeypatch.setattr(checker, "_run_ping", failed_ping)
     result = await checker.check()
     assert result.status == "DOWN"
-    assert result.error_message is not None
+    assert result.error_message == "ping exited with code 1"
 
 
 @pytest.mark.parametrize("timeout,seconds", [(3000, "3"), (1500, "2"), (200, "1")])

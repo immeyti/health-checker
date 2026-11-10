@@ -303,6 +303,18 @@ async def test_down_after_all_retries_alerts(state: StateTracker) -> None:
     assert channel.sent_alerts[0].transition == "UP_TO_DOWN"
 
 
+async def test_first_cycle_down_after_retries_alerts(state: StateTracker) -> None:
+    checker = CountingChecker([make_result(status="DOWN")] * 3)
+    channel = RecordingChannel()
+    daemon = _make_daemon([checker], [channel], state, retries=2)
+
+    await daemon._run_cycle()
+
+    assert checker.calls == 3
+    assert state.get_status("host-a").current_status == "DOWN"
+    assert [alert.transition for alert in channel.sent_alerts] == ["INITIAL_DOWN"]
+
+
 async def test_dashboard_uses_dashboard_retries(state: StateTracker) -> None:
     checker = CountingChecker([make_result(status="DOWN")] * 3, target_type="dashboard")
     daemon = _make_daemon([checker], [], state, retries=2, dashboard_retries=1)
@@ -321,7 +333,7 @@ def _site(name: str, *statuses: str) -> FixedResultChecker:
     return FixedResultChecker([make_result(name=name, status=s) for s in statuses], name=name)
 
 
-async def test_all_targets_down_sends_one_network_alert(state: StateTracker) -> None:
+async def test_all_targets_down_while_monitor_online_records_each_failure(state: StateTracker) -> None:
     checkers = [_site("a", "UP", "DOWN", "UP"), _site("b", "UP", "DOWN", "UP")]
     channel = RecordingChannel()
     daemon = _make_daemon(checkers, [channel], state)
@@ -330,21 +342,20 @@ async def test_all_targets_down_sends_one_network_alert(state: StateTracker) -> 
     await daemon._run_cycle()  # both DOWN together
 
     assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
-        ("Monitor network", "UP_TO_DOWN"),
+        ("a", "UP_TO_DOWN"), ("b", "UP_TO_DOWN"),
     ]
-    assert "All 2 targets" in channel.sent_alerts[0].message
-    assert state.get_status("a").current_status == "UP"
-    assert [log.status for log in state.get_history("a")] == ["UP"]
+    assert state.get_status("a").current_status == "DOWN"
+    assert [log.status for log in state.get_history("a")] == ["DOWN", "UP"]
     attempts = state.get_attempts("a")  # the failed attempt is still kept
     assert [(a["status"], a["network_issue"]) for a in attempts] == [
-        ("UP", None), ("DOWN", "all_targets_failed"),
+        ("UP", None), ("DOWN", None),
     ]
 
     await daemon._run_cycle()  # back UP
 
     assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
-        ("Monitor network", "UP_TO_DOWN"),
-        ("Monitor network", "DOWN_TO_UP"),
+        ("a", "UP_TO_DOWN"), ("b", "UP_TO_DOWN"),
+        ("a", "DOWN_TO_UP"), ("b", "DOWN_TO_UP"),
     ]
 
 
@@ -352,6 +363,7 @@ async def test_network_alert_sent_once_while_down(state: StateTracker) -> None:
     checkers = [_site("a", "UP", "DOWN", "DOWN"), _site("b", "UP", "DOWN", "DOWN")]
     channel = RecordingChannel()
     daemon = _make_daemon(checkers, [channel], state)
+    daemon._connectivity = FakeConnectivity(online=False)
 
     for _ in range(3):
         await daemon._run_cycle()
@@ -359,7 +371,7 @@ async def test_network_alert_sent_once_while_down(state: StateTracker) -> None:
     assert len(channel.sent_alerts) == 1
 
 
-async def test_one_target_down_while_offline_is_not_recorded(state: StateTracker) -> None:
+async def test_one_target_down_with_other_target_up_is_recorded(state: StateTracker) -> None:
     checkers = [_site("a", "UP", "DOWN"), _site("b", "UP", "UP")]
     channel = RecordingChannel()
     daemon = _make_daemon(checkers, [channel], state)
@@ -369,11 +381,10 @@ async def test_one_target_down_while_offline_is_not_recorded(state: StateTracker
     await daemon._run_cycle()
 
     assert [(a.target_name, a.transition) for a in channel.sent_alerts] == [
-        ("Monitor network", "UP_TO_DOWN"),
+        ("a", "UP_TO_DOWN"),
     ]
-    assert "Reference hosts" in channel.sent_alerts[0].message
-    assert state.get_attempts("a")[-1]["network_issue"] == "monitor_offline"
-    assert state.get_status("a").current_status == "UP"
+    assert state.get_attempts("a")[-1]["network_issue"] is None
+    assert state.get_status("a").current_status == "DOWN"
     assert [log.status for log in state.get_history("b")] == ["UP", "UP"]
 
 

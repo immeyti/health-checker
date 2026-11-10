@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from src.checkers.tcp import TCPChecker
 from src.config import TcpTarget
 
@@ -42,10 +40,12 @@ async def test_tcp_refused_port_returns_down():
     assert result.error_message == "Connection refused"
 
 
-@pytest.mark.slow
-async def test_tcp_timeout_returns_down():
-    # 192.0.2.1 is RFC 5737 TEST-NET-1 — packets are silently dropped
-    checker = TCPChecker(TcpTarget(name="blackhole", host="192.0.2.1", port=443, timeout=3000))
+async def test_tcp_timeout_returns_down(monkeypatch):
+    async def stalled_connection(*args):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(asyncio, "open_connection", stalled_connection)
+    checker = TCPChecker(TcpTarget(name="blackhole", host="192.0.2.1", port=443, timeout=10))
     result = await checker.check()
     assert result.status == "DOWN"
     assert "timed out" in result.error_message

@@ -8,6 +8,7 @@ import pytest
 import respx
 
 from src.channels import build_channel
+from src.channels.bale.bale_channel import BaleChannel
 from src.channels.sms.base_provider import BaseSMSProvider
 from src.channels.sms.sms_channel import SMSChannel
 from src.channels.telegram.telegram_channel import TelegramChannel
@@ -49,6 +50,19 @@ async def test_sms_channel_message_contains_target_name():
     await channel.send(_make_alert(target_name="MyServer"))
     _, message = provider.calls[0]
     assert "MyServer" in message
+
+
+def test_initial_down_alert_is_shown_as_failure_in_all_channels():
+    alert = _make_alert(transition="INITIAL_DOWN")
+    channels = [
+        SMSChannel(provider=RecordingProvider(), recipients=[]),
+        TelegramChannel(bot_token="fake", chat_ids=[]),
+        BaleChannel(bot_token="fake", chat_ids=[]),
+    ]
+    for channel in channels:
+        message = channel._format_message(alert)
+        assert message.startswith("🔴")
+        assert "DOWN (first check)" in message
 
 
 async def test_network_alert_has_its_own_message():
