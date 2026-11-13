@@ -27,6 +27,13 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./origin.pem:/certs/origin.pem:ro
       - ./origin.key:/certs/origin.key:ro
+      # Other apps on this host (e.g. directbama.com) own their snippets and certs here;
+      # deploys never overwrite these directories.
+      - ./sites.d:/etc/caddy/sites.d:ro
+      - ./extra-certs:/certs/extra:ro
+    networks:
+      - default
+      - edge
     depends_on:
       - monitor
     logging:
@@ -39,3 +46,9 @@ volumes:
   monitor_data:
   monitor_videos:
   monitor_screenshots:
+
+networks:
+  # Shared with other apps on the host so Caddy can reach them by container name.
+  # Created once on the server: docker network create edge
+  edge:
+    external: true

@@ -2,3 +2,6 @@ health.chmod750.org {
 	tls /certs/origin.pem /certs/origin.key
 	reverse_proxy monitor:8000
 }
+
+# Sites owned by other apps on this host (survives deploys).
+import /etc/caddy/sites.d/*.caddy
